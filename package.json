@@ -10,9 +10,9 @@
     "backend": "cd backend && uv run python run.py",
     "frontend": "cd frontend && npm run dev",
     "build": "cd frontend && npm run build",
-    "install:all": "npm install && cd frontend && npm install",
+    "install:all": "npm install && cd frontend && npm install && cd .. && cd backend && uv sync",
     "install:backend": "cd backend && uv sync",
-    "setup": "npm run install:all && npm run install:backend",
+    "setup": "npm run install:all",
     "setup:backend": "cd backend && uv sync"
   },
   "devDependencies": {
