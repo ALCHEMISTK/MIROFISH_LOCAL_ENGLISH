@@ -5,8 +5,16 @@ import SimulationView from '../views/SimulationView.vue'
 import SimulationRunView from '../views/SimulationRunView.vue'
 import ReportView from '../views/ReportView.vue'
 import InteractionView from '../views/InteractionView.vue'
+import SetupView from '../views/SetupView.vue'
+import { getSetupState, setSetupStatus } from '../store/setupStatus'
+import { getSetupStatus } from '../api/setup'
 
 const routes = [
+  {
+    path: '/setup',
+    name: 'Setup',
+    component: SetupView
+  },
   {
     path: '/',
     name: 'Home',
@@ -47,6 +55,31 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach(async (to, from, next) => {
+  if (to.name === 'Setup') return next()
+
+  const state = getSetupState()
+
+  // Use cached status if already checked
+  if (state.checked) {
+    if (!state.configured) return next({ name: 'Setup' })
+    return next()
+  }
+
+  // Check with backend
+  try {
+    const res = await getSetupStatus()
+    const configured = res.configured
+    setSetupStatus(configured)
+    if (!configured) return next({ name: 'Setup' })
+    next()
+  } catch (e) {
+    // Backend not reachable - let user proceed (they'll see errors)
+    setSetupStatus(true)
+    next()
+  }
 })
 
 export default router

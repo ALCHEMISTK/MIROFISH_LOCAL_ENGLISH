@@ -1,54 +1,54 @@
 """
-配置管理
-统一从项目根目录的 .env 文件加载配置
+Configuration management.
+Loads from .env file, then overrides with settings.json if available.
 """
 
 import os
 from dotenv import load_dotenv
 
-# 加载项目根目录的 .env 文件
-# 路径: MiroFish/.env (相对于 backend/app/config.py)
+# Load .env file from project root
 project_root_env = os.path.join(os.path.dirname(__file__), '../../.env')
 
 if os.path.exists(project_root_env):
     load_dotenv(project_root_env, override=True)
 else:
-    # 如果根目录没有 .env，尝试加载环境变量（用于生产环境）
     load_dotenv(override=True)
 
 
 class Config:
-    """Flask配置类"""
-    
-    # Flask配置
+    """Flask configuration class"""
+
+    # Flask
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
     DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
-    
-    # JSON配置 - 禁用ASCII转义，让中文直接显示（而不是 \uXXXX 格式）
+
+    # JSON - disable ASCII escaping for Unicode support
     JSON_AS_ASCII = False
-    
-    # LLM配置（统一使用OpenAI格式）
-    LLM_API_KEY = os.environ.get('LLM_API_KEY')
-    LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'https://api.openai.com/v1')
-    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'gpt-4o-mini')
-    
-    # Zep配置
-    ZEP_API_KEY = os.environ.get('ZEP_API_KEY')
-    
-    # 文件上传配置
+
+    # LLM configuration (OpenAI SDK format, points to Ollama by default)
+    LLM_API_KEY = os.environ.get('LLM_API_KEY', 'ollama')  # Ollama accepts any non-empty string
+    LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
+    LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'qwen2.5:7b')
+
+    # Ollama + LightRAG configuration (local GraphRAG, replaces Zep Cloud)
+    OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
+    OLLAMA_EMBED_MODEL = os.environ.get('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+    LIGHTRAG_DATA_DIR = os.path.join(os.path.dirname(__file__), '../data/lightrag_graphs')
+
+    # File upload
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB
     UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '../uploads')
     ALLOWED_EXTENSIONS = {'pdf', 'md', 'txt', 'markdown'}
-    
-    # 文本处理配置
-    DEFAULT_CHUNK_SIZE = 500  # 默认切块大小
-    DEFAULT_CHUNK_OVERLAP = 50  # 默认重叠大小
-    
-    # OASIS模拟配置
+
+    # Text processing
+    DEFAULT_CHUNK_SIZE = 500
+    DEFAULT_CHUNK_OVERLAP = 50
+
+    # OASIS simulation
     OASIS_DEFAULT_MAX_ROUNDS = int(os.environ.get('OASIS_DEFAULT_MAX_ROUNDS', '10'))
     OASIS_SIMULATION_DATA_DIR = os.path.join(os.path.dirname(__file__), '../uploads/simulations')
-    
-    # OASIS平台可用动作配置
+
+    # OASIS platform available actions
     OASIS_TWITTER_ACTIONS = [
         'CREATE_POST', 'LIKE_POST', 'REPOST', 'FOLLOW', 'DO_NOTHING', 'QUOTE_POST'
     ]
@@ -57,19 +57,37 @@ class Config:
         'LIKE_COMMENT', 'DISLIKE_COMMENT', 'SEARCH_POSTS', 'SEARCH_USER',
         'TREND', 'REFRESH', 'DO_NOTHING', 'FOLLOW', 'MUTE'
     ]
-    
-    # Report Agent配置
+
+    # Report Agent
     REPORT_AGENT_MAX_TOOL_CALLS = int(os.environ.get('REPORT_AGENT_MAX_TOOL_CALLS', '5'))
     REPORT_AGENT_MAX_REFLECTION_ROUNDS = int(os.environ.get('REPORT_AGENT_MAX_REFLECTION_ROUNDS', '2'))
     REPORT_AGENT_TEMPERATURE = float(os.environ.get('REPORT_AGENT_TEMPERATURE', '0.5'))
-    
+
+    @classmethod
+    def reload_from_settings(cls):
+        """Reload configuration from settings.json, falling back to .env values."""
+        from .settings import load_settings, migrate_from_env
+        migrate_from_env()
+        settings = load_settings()
+        if settings.get("llm_api_key"):
+            cls.LLM_API_KEY = settings["llm_api_key"]
+        if settings.get("llm_base_url"):
+            cls.LLM_BASE_URL = settings["llm_base_url"]
+        if settings.get("llm_model_name"):
+            cls.LLM_MODEL_NAME = settings["llm_model_name"]
+        if settings.get("ollama_embed_model"):
+            cls.OLLAMA_EMBED_MODEL = settings["ollama_embed_model"]
+
     @classmethod
     def validate(cls):
-        """验证必要配置"""
+        """Validate required configuration."""
         errors = []
-        if not cls.LLM_API_KEY:
-            errors.append("LLM_API_KEY 未配置")
-        if not cls.ZEP_API_KEY:
-            errors.append("ZEP_API_KEY 未配置")
+        if not cls.LLM_BASE_URL:
+            errors.append("LLM_BASE_URL is not configured")
+        if not cls.LLM_MODEL_NAME:
+            errors.append("LLM_MODEL_NAME is not configured")
         return errors
 
+
+# Auto-load settings on import
+Config.reload_from_settings()
