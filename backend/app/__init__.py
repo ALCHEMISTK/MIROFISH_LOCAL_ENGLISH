@@ -12,7 +12,7 @@ from flask import Flask, request
 from flask_cors import CORS
 
 from .config import Config
-from .utils.logger import setup_logger, get_logger
+from .utils.logger import setup_logger, get_logger, configure_werkzeug_logging
 
 
 def create_app(config_class=Config):
@@ -27,15 +27,16 @@ def create_app(config_class=Config):
     # Setup logging
     logger = setup_logger('mirofish')
 
-    # Only log startup info in reloader subprocess (avoid duplicate logs in debug mode)
+    # Silence Werkzeug HTTP access logs — app-level logs are more informative
+    configure_werkzeug_logging()
+
+    # Only log startup info once (avoid duplicate logs in debug/reload mode)
     is_reloader_process = os.environ.get('WERKZEUG_RUN_MAIN') == 'true'
     debug_mode = app.config.get('DEBUG', False)
     should_log_startup = not debug_mode or is_reloader_process
 
     if should_log_startup:
-        logger.info("=" * 50)
-        logger.info("MiroFish Backend starting...")
-        logger.info("=" * 50)
+        logger.info("MiroFish backend initializing...")
 
     # Enable CORS
     CORS(app, resources={r"/api/*": {"origins": "*"}})
@@ -43,22 +44,6 @@ def create_app(config_class=Config):
     # Register simulation process cleanup handler
     from .services.simulation_runner import SimulationRunner
     SimulationRunner.register_cleanup()
-    if should_log_startup:
-        logger.info("Simulation process cleanup handler registered")
-
-    # Request logging middleware
-    @app.before_request
-    def log_request():
-        logger = get_logger('mirofish.request')
-        logger.debug(f"Request: {request.method} {request.path}")
-        if request.content_type and 'json' in request.content_type:
-            logger.debug(f"Body: {request.get_json(silent=True)}")
-
-    @app.after_request
-    def log_response(response):
-        logger = get_logger('mirofish.request')
-        logger.debug(f"Response: {response.status_code}")
-        return response
 
     # Register blueprints
     from .api import graph_bp, simulation_bp, report_bp, setup_bp
@@ -72,7 +57,34 @@ def create_app(config_class=Config):
     def health():
         return {'status': 'ok', 'service': 'MiroFish Backend'}
 
+    # Activity logging middleware — log meaningful API calls to the console
+    _NOISY_PATHS = {'/health', '/api/simulation/'}  # prefixes to skip
+    _POLLING_SUFFIXES = (
+        '/run-status', '/progress', '/agent-log', '/console-log',
+        '/profiles/stream', '/config/stream', '/prepare/status',
+    )
+
+    @app.before_request
+    def log_activity():
+        path = request.path
+        method = request.method
+
+        # Skip polling endpoints (called every second by the UI)
+        if any(path.endswith(s) for s in _POLLING_SUFFIXES):
+            return
+        # Skip health checks and static GET requests on list endpoints
+        if path == '/health':
+            return
+
+        # Only log mutating requests and important GETs
+        if method in ('POST', 'DELETE', 'PUT', 'PATCH'):
+            body = request.get_json(silent=True) or {}
+            sim_id = body.get('simulation_id', '')
+            detail = f" [{sim_id}]" if sim_id else ""
+            act_logger = get_logger('mirofish.api')
+            act_logger.info(f"→ {method} {path}{detail}")
+
     if should_log_startup:
-        logger.info("MiroFish Backend started successfully")
+        logger.info("MiroFish backend ready — awaiting requests")
 
     return app
