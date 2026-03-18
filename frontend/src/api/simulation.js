@@ -185,3 +185,12 @@ export const getSimulationHistory = (limit = 20) => {
   return service.get('/api/simulation/history', { params: { limit } })
 }
 
+/**
+ * Tail the live backend simulation.log file
+ * @param {string} simulationId
+ * @param {number} lines - Number of tail lines to fetch (default 80)
+ */
+export const getSimulationLogTail = (simulationId, lines = 80) => {
+  return service.get(`/api/simulation/${simulationId}/log-tail`, { params: { lines } })
+}
+

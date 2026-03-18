@@ -2691,3 +2691,73 @@ def close_simulation_env():
             "error": str(e),
             "traceback": traceback.format_exc()
         }), 500
+
+
+# ============== Live Log Tail API ==============
+
+@simulation_bp.route('/<simulation_id>/log-tail', methods=['GET'])
+def get_simulation_log_tail(simulation_id: str):
+    """
+    Return the last N lines from the simulation's process log file (simulation.log).
+
+    This lets the frontend poll for live backend output instead of only showing
+    client-side generated status messages.
+
+    Query parameters:
+        lines: Number of tail lines to return (default 80, max 500)
+        offset: Line offset from the end (default 0 — newest lines)
+
+    Response:
+        {
+            "success": true,
+            "data": {
+                "simulation_id": "sim_xxxx",
+                "log_file": "/absolute/path/to/simulation.log",
+                "total_lines": 1234,
+                "lines": ["line1", "line2", ...]
+            }
+        }
+    """
+    try:
+        n_lines = min(request.args.get('lines', 80, type=int), 500)
+        sim_dir = os.path.join(
+            os.path.dirname(__file__),
+            f'../../uploads/simulations/{simulation_id}'
+        )
+        log_path = os.path.join(sim_dir, 'simulation.log')
+
+        if not os.path.exists(log_path):
+            return jsonify({
+                "success": True,
+                "data": {
+                    "simulation_id": simulation_id,
+                    "log_file": log_path,
+                    "total_lines": 0,
+                    "lines": []
+                }
+            })
+
+        # Efficiently tail the file without reading the whole thing into memory
+        with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+            all_lines = f.readlines()
+
+        total = len(all_lines)
+        tail = [l.rstrip('\n\r') for l in all_lines[-n_lines:]]
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "simulation_id": simulation_id,
+                "log_file": log_path,
+                "total_lines": total,
+                "lines": tail
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Failed to tail simulation log: {str(e)}")
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500

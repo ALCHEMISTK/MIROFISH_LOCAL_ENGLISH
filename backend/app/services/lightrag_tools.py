@@ -119,13 +119,50 @@ class InsightForgeResult:
         }
 
     def to_text(self) -> str:
-        parts = [f"Query: {self.query}"]
+        """Produce structured text consumed by the frontend's parseInsightForge parser."""
+        parts = [
+            f"Analysis question: {self.query}",
+            f"Prediction scenario: (simulation context)",
+            f"Related prediction facts: {self.total_facts}",
+            f"Entities involved: {self.total_nodes}",
+            f"Relation chains: {self.total_edges}",
+        ]
+
         if self.sub_questions:
-            parts.append(f"Sub-questions analyzed: {len(self.sub_questions)}")
+            parts.append("\n### Analyzed sub-questions")
+            for i, q in enumerate(self.sub_questions, 1):
+                parts.append(f"{i}. {q}")
+
         if self.facts:
-            parts.append("\n### Key Insights:")
+            parts.append("\n### [Key Facts]")
             for i, f in enumerate(self.facts, 1):
-                parts.append(f"{i}. {f}")
+                parts.append(f'{i}. "{f}"')
+
+        if self.nodes:
+            parts.append("\n### [Core Entities]")
+            for node in self.nodes:
+                entity_type = next(
+                    (l for l in node.labels if l not in ("Entity", "Node")), "Entity"
+                ) if hasattr(node, 'labels') else "Entity"
+                parts.append(f"- **{node.name}** ({entity_type})")
+                if node.summary:
+                    parts.append(f'  Summary: "{node.summary}"')
+                related = sum(
+                    1 for e in self.edges
+                    if hasattr(e, 'source_node_name') and (
+                        e.source_node_name == node.name or e.target_node_name == node.name
+                    )
+                )
+                parts.append(f"  Related facts: {related}")
+
+        if self.edges:
+            parts.append("\n### [Relation Chains]")
+            for edge in self.edges:
+                if hasattr(edge, 'source_node_name'):
+                    parts.append(
+                        f"- {edge.source_node_name} --[{edge.name}]--> {edge.target_node_name}"
+                    )
+
         return "\n".join(parts)
 
 
@@ -150,7 +187,40 @@ class PanoramaResult:
         }
 
     def to_text(self) -> str:
-        return self.summary_text
+        """Produce structured text consumed by the frontend's parsePanorama parser."""
+        # Heuristically split active vs historical facts from the summary text
+        active_facts = []
+        historical_facts = []
+        for edge in self.edges[:30]:
+            if edge.fact:
+                active_facts.append(edge.fact)
+
+        parts = [
+            f"Query: (graph overview)",
+            f"Total nodes: {self.total_nodes}",
+            f"Total edges: {self.total_edges}",
+            f"Active facts: {len(active_facts)}",
+            f"Historical/expired facts: 0",
+        ]
+
+        if active_facts:
+            parts.append("\n### [Active Facts]")
+            for i, f in enumerate(active_facts, 1):
+                parts.append(f'{i}. "{f}"')
+
+        if self.nodes:
+            parts.append("\n### [Involved Entities]")
+            for node in self.nodes[:20]:
+                entity_type = next(
+                    (l for l in node.labels if l not in ("Entity", "Node")), "Entity"
+                ) if hasattr(node, 'labels') else "Entity"
+                parts.append(f"- **{node.name}** ({entity_type})")
+
+        # Append the LLM community summary at the end
+        if self.summary_text:
+            parts.append(f"\n{self.summary_text}")
+
+        return "\n".join(parts)
 
 
 @dataclass
@@ -272,7 +342,7 @@ class ZepToolsService:
             total_edges=0,
         )
 
-    def panorama_search(self, graph_id: str) -> PanoramaResult:
+    def panorama_search(self, graph_id: str, query: str = "", include_expired: bool = True) -> PanoramaResult:
         """
         Full graph snapshot — reads all nodes and edges from the GraphML file.
         Also runs a global LightRAG query to get a community-level summary.
@@ -554,6 +624,26 @@ class ZepToolsService:
                     "selected_agents": self.selected_agents,
                     "summary": self.summary,
                 }
+
+            def to_text(self):
+                """Produce structured text consumed by the frontend's parseInterview parser."""
+                parts = [
+                    f"**Interview topic:** {self.interview_topic}",
+                    f"**Interviewees:** {len(self.agent_responses)} / {self.total_agents} simulated agents",
+                ]
+
+                if self.selection_reasoning:
+                    parts.append(f"\n### Interviewee selection rationale\n{self.selection_reasoning}\n---")
+
+                parts.append(f"\n### Interview Transcripts")
+                for i, r in enumerate(self.agent_responses, 1):
+                    agent_type = r.get("agent_type", "Unknown")
+                    parts.append(f"\n#### Interview #{i}: {r['agent_name']}")
+                    parts.append(f"_Type: {agent_type}_")
+                    parts.append(f"\n**Q:** {self.interview_topic}")
+                    parts.append(f"\n**A:** {r['response']}")
+
+                return "\n".join(parts)
 
         return _InterviewResultCompat(
             topic=interview_requirement,
