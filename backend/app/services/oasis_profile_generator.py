@@ -701,14 +701,14 @@ Please generate JSON with the following fields:
 3. age: Age number (must be an integer)
 4. gender: Gender, must be in English: "male" or "female"
 5. mbti: MBTI type (e.g., INTJ, ENFP)
-6. country: Country (in Chinese, e.g., "中国")
+6. country: Country (e.g., "China")
 7. profession: Occupation
 8. interested_topics: Array of interest topics
 
 Important:
 - All field values must be strings or numbers; do not use newlines
 - persona must be a coherent text description
-- Use Chinese (except the gender field which must use English male/female)
+- Use English for all fields (gender must be "male" or "female")
 - Content must be consistent with entity information
 - age must be a valid integer, gender must be "male" or "female"
 """
@@ -750,14 +750,14 @@ Please generate JSON with the following fields:
 3. age: Fixed as 30 (virtual age for institutional accounts)
 4. gender: Fixed as "other" (institutional accounts use "other" for non-individual)
 5. mbti: MBTI type to describe account style, e.g., ISTJ for rigorous and conservative
-6. country: Country (in Chinese, e.g., "中国")
+6. country: Country (e.g., "China")
 7. profession: Institutional function description
 8. interested_topics: Array of focus areas
 
 Important:
 - All field values must be strings or numbers; null values are not allowed
 - persona must be a coherent text description; do not use newlines
-- Use Chinese (except the gender field which must use English "other")
+- Use English for all fields (gender must be "other" for institutional accounts)
 - age must be integer 30, gender must be string "other"
 - Institutional account communications must match its identity and positioning"""
 
@@ -804,7 +804,7 @@ Important:
                 "age": 30,  # Virtual age for institutional account
                 "gender": "other",  # Institutions use "other"
                 "mbti": "ISTJ",  # Institutional style: rigorous and conservative
-                "country": "中国",
+                "country": "China",
                 "profession": "Media",
                 "interested_topics": ["General News", "Current Events", "Public Affairs"],
             }
@@ -816,7 +816,7 @@ Important:
                 "age": 30,  # Virtual age for institutional account
                 "gender": "other",  # Institutions use "other"
                 "mbti": "ISTJ",  # Institutional style: rigorous and conservative
-                "country": "中国",
+                "country": "China",
                 "profession": entity_type,
                 "interested_topics": ["Public Policy", "Community", "Official Announcements"],
             }
@@ -1162,7 +1162,7 @@ Important:
                 "age": profile.age if profile.age else 30,
                 "gender": self._normalize_gender(profile.gender),
                 "mbti": profile.mbti if profile.mbti else "ISTJ",
-                "country": profile.country if profile.country else "中国",
+                "country": profile.country if profile.country else "China",
             }
 
             # Optional fields

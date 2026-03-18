@@ -1427,16 +1427,16 @@ Return a JSON list of sub-questions."""
                 clean_text = re.sub(r'#{1,6}\s+', '', combined_responses)
                 clean_text = re.sub(r'\{[^}]*tool_name[^}]*\}', '', clean_text)
                 clean_text = re.sub(r'[*_`|>~\-]{2,}', '', clean_text)
-                clean_text = re.sub(r'问题\d+[：:]\s*', '', clean_text)
+                clean_text = re.sub(r'(Question|问题)\d+[：:]\s*', '', clean_text)
                 clean_text = re.sub(r'【[^】]+】', '', clean_text)
 
                 # Strategy 1 (primary): extract complete meaningful sentences
-                sentences = re.split(r'[。！？]', clean_text)
+                sentences = re.split(r'[.!?。！？]', clean_text)
                 meaningful = [
                     s.strip() for s in sentences
                     if 20 <= len(s.strip()) <= 150
                     and not re.match(r'^[\s\W，,；;：:、]+', s.strip())
-                    and not s.strip().startswith(('{', '问题'))
+                    and not s.strip().startswith(('{', 'Question', '问题'))
                 ]
                 meaningful.sort(key=len, reverse=True)
                 key_quotes = [s + "。" for s in meaningful[:3]]
