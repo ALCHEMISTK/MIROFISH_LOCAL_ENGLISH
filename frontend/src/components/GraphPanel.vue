@@ -244,7 +244,7 @@ const { isDark } = useTheme()
 const isDarkMode = () => document.documentElement.classList.contains('dark')
 
 // Theme-aware color helpers
-const nodeLabelColor = () => isDarkMode() ? '#e8e8e8' : '#333333'
+const nodeLabelColor = () => isDarkMode() ? '#ffffff' : '#333333'
 const edgeLabelColor = () => isDarkMode() ? '#aaaaaa' : '#666666'
 const edgeLabelBgColor = () => isDarkMode() ? 'rgba(20,20,20,0.88)' : 'rgba(255,255,255,0.95)'
 

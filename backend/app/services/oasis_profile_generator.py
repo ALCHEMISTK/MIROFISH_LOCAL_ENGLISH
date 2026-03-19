@@ -661,7 +661,14 @@ class OasisProfileGenerator:
 
     def _get_system_prompt(self, is_individual: bool) -> str:
         """Get system prompt"""
-        base_prompt = "You are a social media user persona generation expert. Generate detailed, realistic personas for public opinion simulation, maximally reflecting real-world circumstances. You must return valid JSON format; all string values must not contain unescaped newlines. Use English for all output."
+        base_prompt = (
+            "You are a social media user persona generation expert. "
+            "Generate detailed, realistic personas for public opinion simulation, maximally reflecting real-world circumstances. "
+            "You must return valid JSON format; all string values must not contain unescaped newlines. "
+            "CRITICAL REQUIREMENT: You MUST write ALL output exclusively in English. "
+            "Do NOT use Chinese, Japanese, Korean, Arabic, or any non-English language anywhere in the JSON. "
+            "Even if the input contains Chinese or other languages, your JSON output must be 100% English."
+        )
         return base_prompt
 
     def _build_individual_persona_prompt(
@@ -677,7 +684,9 @@ class OasisProfileGenerator:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""Generate a detailed social media user persona for the entity below, maximally reflecting real-world circumstances.
+        return f"""LANGUAGE: ALL OUTPUT MUST BE IN ENGLISH ONLY. No Chinese or other languages.
+
+Generate a detailed social media user persona for the entity below, maximally reflecting real-world circumstances.
 
 Entity name: {entity_name}
 Entity type: {entity_type}
@@ -701,16 +710,16 @@ Please generate JSON with the following fields:
 3. age: Age number (must be an integer)
 4. gender: Gender, must be in English: "male" or "female"
 5. mbti: MBTI type (e.g., INTJ, ENFP)
-6. country: Country (e.g., "China")
-7. profession: Occupation
-8. interested_topics: Array of interest topics
+6. country: Country in English (e.g., "United States", "Germany")
+7. profession: Occupation in English
+8. interested_topics: Array of interest topics in English
 
 Important:
+- WRITE EVERYTHING IN ENGLISH. If the input is in Chinese, translate it to English in your output.
 - All field values must be strings or numbers; do not use newlines
 - persona must be a coherent text description
-- Use English for all fields (gender must be "male" or "female")
-- Content must be consistent with entity information
-- age must be a valid integer, gender must be "male" or "female"
+- gender must be "male" or "female"
+- age must be a valid integer
 """
 
     def _build_group_persona_prompt(
@@ -726,7 +735,9 @@ Important:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""Generate a detailed social media account profile for the institution/group entity below, maximally reflecting real-world circumstances.
+        return f"""LANGUAGE: ALL OUTPUT MUST BE IN ENGLISH ONLY. No Chinese or other languages.
+
+Generate a detailed social media account profile for the institution/group entity below, maximally reflecting real-world circumstances.
 
 Entity name: {entity_name}
 Entity type: {entity_type}
@@ -750,16 +761,16 @@ Please generate JSON with the following fields:
 3. age: Fixed as 30 (virtual age for institutional accounts)
 4. gender: Fixed as "other" (institutional accounts use "other" for non-individual)
 5. mbti: MBTI type to describe account style, e.g., ISTJ for rigorous and conservative
-6. country: Country (e.g., "China")
-7. profession: Institutional function description
-8. interested_topics: Array of focus areas
+6. country: Country in English (e.g., "United States", "United Kingdom")
+7. profession: Institutional function description in English
+8. interested_topics: Array of focus areas in English
 
 Important:
+- WRITE EVERYTHING IN ENGLISH. If the input is in Chinese, translate it to English in your output.
 - All field values must be strings or numbers; null values are not allowed
 - persona must be a coherent text description; do not use newlines
-- Use English for all fields (gender must be "other" for institutional accounts)
-- age must be integer 30, gender must be string "other"
-- Institutional account communications must match its identity and positioning"""
+- gender must be "other" for institutional accounts
+- age must be integer 30"""
 
     def _generate_profile_rule_based(
         self,
