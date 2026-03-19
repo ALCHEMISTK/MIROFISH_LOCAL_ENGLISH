@@ -238,6 +238,15 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick, computed } from 'vue'
 import * as d3 from 'd3'
+import { useTheme } from '../store/theme'
+
+const { isDark } = useTheme()
+const isDarkMode = () => document.documentElement.classList.contains('dark')
+
+// Theme-aware color helpers
+const nodeLabelColor = () => isDarkMode() ? '#e8e8e8' : '#333333'
+const edgeLabelColor = () => isDarkMode() ? '#aaaaaa' : '#666666'
+const edgeLabelBgColor = () => isDarkMode() ? 'rgba(20,20,20,0.88)' : 'rgba(255,255,255,0.95)'
 
 const props = defineProps({
   graphData: Object,
@@ -579,8 +588,8 @@ const renderGraph = () => {
       event.stopPropagation()
       // Reset styles of previously selected edge
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-      linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
-      linkLabels.attr('fill', '#666')
+      linkLabelBg.attr('fill', edgeLabelBgColor())
+      linkLabels.attr('fill', edgeLabelColor())
       // Highlight currently selected edge
       d3.select(event.target).attr('stroke', '#3498db').attr('stroke-width', 3)
 
@@ -594,7 +603,7 @@ const renderGraph = () => {
   const linkLabelBg = linkGroup.selectAll('rect')
     .data(edges)
     .enter().append('rect')
-    .attr('fill', 'rgba(255,255,255,0.95)')
+    .attr('fill', edgeLabelBgColor())
     .attr('rx', 3)
     .attr('ry', 3)
     .style('cursor', 'pointer')
@@ -603,8 +612,8 @@ const renderGraph = () => {
     .on('click', (event, d) => {
       event.stopPropagation()
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-      linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
-      linkLabels.attr('fill', '#666')
+      linkLabelBg.attr('fill', edgeLabelBgColor())
+      linkLabels.attr('fill', edgeLabelColor())
       // Highlight the corresponding edge
       link.filter(l => l === d).attr('stroke', '#3498db').attr('stroke-width', 3)
       d3.select(event.target).attr('fill', 'rgba(52, 152, 219, 0.1)')
@@ -621,7 +630,7 @@ const renderGraph = () => {
     .enter().append('text')
     .text(d => d.name)
     .attr('font-size', '9px')
-    .attr('fill', '#666')
+    .attr('fill', edgeLabelColor())
     .attr('text-anchor', 'middle')
     .attr('dominant-baseline', 'middle')
     .style('cursor', 'pointer')
@@ -631,8 +640,8 @@ const renderGraph = () => {
     .on('click', (event, d) => {
       event.stopPropagation()
       linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-      linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
-      linkLabels.attr('fill', '#666')
+      linkLabelBg.attr('fill', edgeLabelBgColor())
+      linkLabels.attr('fill', edgeLabelColor())
       // Highlight the corresponding edge
       link.filter(l => l === d).attr('stroke', '#3498db').attr('stroke-width', 3)
       d3.select(event.target).attr('fill', '#3498db')
@@ -731,7 +740,7 @@ const renderGraph = () => {
     .enter().append('text')
     .text(d => d.name.length > 8 ? d.name.substring(0, 8) + '…' : d.name)
     .attr('font-size', '11px')
-    .attr('fill', '#333')
+    .attr('fill', nodeLabelColor())
     .attr('font-weight', '500')
     .attr('dx', 14)
     .attr('dy', 4)
@@ -786,6 +795,11 @@ const renderGraph = () => {
 watch(() => props.graphData, () => {
   nextTick(renderGraph)
 }, { deep: true })
+
+// Re-render graph when theme toggles so label colors update instantly
+watch(isDark, () => {
+  nextTick(renderGraph)
+})
 
 // Watch the edge labels display toggle
 watch(showEdgeLabels, (newVal) => {
