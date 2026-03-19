@@ -239,15 +239,15 @@ const saveAndContinue = async () => {
 <style scoped>
 .setup-container {
   min-height: 100vh;
-  background: #FFFFFF;
+  background: var(--c-bg);
   font-family: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
-  color: #000000;
+  color: var(--c-text);
 }
 
 .navbar {
   height: 60px;
-  background: #000000;
-  color: #FFFFFF;
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-text);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -274,8 +274,9 @@ const saveAndContinue = async () => {
 }
 
 .setup-card {
-  border: 1px solid #E5E5E5;
+  border: 1px solid var(--c-border-light);
   padding: 40px;
+  background: var(--c-surface);
 }
 
 .card-header {
@@ -286,17 +287,18 @@ const saveAndContinue = async () => {
   font-size: 2rem;
   font-weight: 520;
   margin: 0 0 10px 0;
+  color: var(--c-text);
 }
 
 .subtitle {
-  color: #666;
+  color: var(--c-text-muted);
   font-size: 0.95rem;
 }
 
 .config-section {
   margin-bottom: 30px;
   padding-bottom: 30px;
-  border-bottom: 1px solid #F0F0F0;
+  border-bottom: 1px solid var(--c-surface-3);
 }
 
 .config-section:last-of-type {
@@ -310,23 +312,24 @@ const saveAndContinue = async () => {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: var(--c-text);
 }
 
 .section-num {
   font-family: 'JetBrains Mono', monospace;
-  color: #FF4500;
+  color: var(--c-accent);
   font-weight: 700;
   font-size: 0.8rem;
 }
 
 .section-desc {
-  color: #666;
+  color: var(--c-text-muted);
   font-size: 0.85rem;
   margin-bottom: 20px;
 }
 
 .section-desc a {
-  color: #FF4500;
+  color: var(--c-accent);
   text-decoration: none;
 }
 
@@ -338,8 +341,9 @@ const saveAndContinue = async () => {
 
 .preset-btn {
   padding: 8px 16px;
-  border: 1px solid #000;
-  background: #FFF;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.8rem;
   font-weight: 700;
@@ -349,8 +353,9 @@ const saveAndContinue = async () => {
 }
 
 .preset-btn:hover {
-  background: #000;
-  color: #FFF;
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-text);
+  border-color: var(--c-inverse-bg);
 }
 
 .form-group {
@@ -361,7 +366,7 @@ const saveAndContinue = async () => {
   display: block;
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
-  color: #999;
+  color: var(--c-text-muted);
   margin-bottom: 6px;
   letter-spacing: 0.5px;
 }
@@ -369,8 +374,9 @@ const saveAndContinue = async () => {
 .form-input {
   width: 100%;
   padding: 12px 16px;
-  border: 1px solid #DDD;
-  background: #FAFAFA;
+  border: 1px solid var(--c-border-light);
+  background: var(--c-surface-2);
+  color: var(--c-text);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.9rem;
   outline: none;
@@ -378,8 +384,8 @@ const saveAndContinue = async () => {
 }
 
 .form-input:focus {
-  border-color: #000;
-  background: #FFF;
+  border-color: var(--c-border);
+  background: var(--c-surface);
 }
 
 .input-with-toggle {
@@ -393,16 +399,16 @@ const saveAndContinue = async () => {
 
 .toggle-btn {
   padding: 0 16px;
-  border: 1px solid #DDD;
-  background: #FFF;
+  border: 1px solid var(--c-border-light);
+  background: var(--c-surface);
   font-family: 'JetBrains Mono', monospace;
   font-size: 0.75rem;
   cursor: pointer;
-  color: #666;
+  color: var(--c-text-muted);
 }
 
 .toggle-btn:hover {
-  background: #F0F0F0;
+  background: var(--c-surface-3);
 }
 
 .form-row {
@@ -426,13 +432,13 @@ const saveAndContinue = async () => {
   width: 100%;
   text-align: left;
   padding: 0;
-  color: #000;
+  color: var(--c-text);
 }
 
 .toggle-arrow {
   margin-left: auto;
   font-size: 1.2rem;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .boost-fields {
@@ -447,21 +453,33 @@ const saveAndContinue = async () => {
 }
 
 .status-message.success {
+  background: #1a2e1a;
+  color: #66bb6a;
+  border: 1px solid #2e5a2e;
+}
+
+html:not(.dark) .status-message.success {
   background: #E8F5E9;
   color: #2E7D32;
   border: 1px solid #C8E6C9;
 }
 
 .status-message.error {
+  background: #2e1a1a;
+  color: #ef9a9a;
+  border: 1px solid #5a2e2e;
+}
+
+html:not(.dark) .status-message.error {
   background: #FFEBEE;
   color: #C62828;
   border: 1px solid #FFCDD2;
 }
 
 .status-message.info {
-  background: #F5F5F5;
-  color: #666;
-  border: 1px solid #E5E5E5;
+  background: var(--c-surface-2);
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border-light);
 }
 
 .action-row {
@@ -481,24 +499,25 @@ const saveAndContinue = async () => {
 }
 
 .validate-btn {
-  background: #FFF;
-  color: #000;
-  border: 1px solid #000;
+  background: var(--c-surface);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
 }
 
 .validate-btn:hover:not(:disabled) {
-  background: #F0F0F0;
+  background: var(--c-surface-3);
 }
 
 .save-btn {
-  background: #000;
-  color: #FFF;
-  border: 1px solid #000;
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-text);
+  border: 1px solid var(--c-inverse-bg);
 }
 
 .save-btn:hover:not(:disabled) {
-  background: #FF4500;
-  border-color: #FF4500;
+  background: var(--c-accent);
+  border-color: var(--c-accent);
+  box-shadow: 0 0 12px rgba(255, 107, 0, 0.3);
 }
 
 .validate-btn:disabled, .save-btn:disabled {

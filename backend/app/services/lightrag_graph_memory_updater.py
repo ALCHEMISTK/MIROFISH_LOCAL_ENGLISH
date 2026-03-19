@@ -149,6 +149,10 @@ class ZepGraphMemoryManager:
     Collects agent activities and flushes them to LightRAG in the background.
     """
 
+    # Class-level registry: simulation_id -> ZepGraphMemoryManager instance
+    _instances: Dict[str, 'ZepGraphMemoryManager'] = {}
+    _lock = threading.Lock()
+
     def __init__(
         self,
         graph_id: str,
@@ -169,6 +173,54 @@ class ZepGraphMemoryManager:
         self._total_sent = 0
         self._failed_count = 0
 
+    # ------------------------------------------------------------------
+    # Class-level factory / registry methods (called by simulation_runner)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def create_updater(cls, simulation_id: str, graph_id: str) -> 'ZepGraphMemoryManager':
+        """Create, start, and register a manager for the given simulation."""
+        with cls._lock:
+            if simulation_id in cls._instances:
+                # Stop the old one first
+                cls._instances[simulation_id].stop()
+            manager = cls(graph_id=graph_id)
+            manager.start()
+            cls._instances[simulation_id] = manager
+            logger.info(f"Created ZepGraphMemoryManager: simulation_id={simulation_id}, graph_id={graph_id}")
+            return manager
+
+    @classmethod
+    def get_updater(cls, simulation_id: str) -> Optional['ZepGraphMemoryManager']:
+        """Retrieve the registered manager for a simulation, or None."""
+        return cls._instances.get(simulation_id)
+
+    @classmethod
+    def stop_updater(cls, simulation_id: str, timeout: float = 10.0):
+        """Stop and deregister the manager for a simulation."""
+        with cls._lock:
+            manager = cls._instances.pop(simulation_id, None)
+        if manager:
+            manager.stop(timeout=timeout)
+            logger.info(f"Stopped ZepGraphMemoryManager: simulation_id={simulation_id}")
+
+    @classmethod
+    def stop_all(cls, timeout: float = 10.0):
+        """Stop and deregister all managers."""
+        with cls._lock:
+            instances = dict(cls._instances)
+            cls._instances.clear()
+        for sim_id, manager in instances.items():
+            try:
+                manager.stop(timeout=timeout)
+                logger.info(f"Stopped ZepGraphMemoryManager (stop_all): simulation_id={sim_id}")
+            except Exception as e:
+                logger.error(f"Error stopping manager for {sim_id}: {e}")
+
+    # ------------------------------------------------------------------
+    # Instance methods
+    # ------------------------------------------------------------------
+
     def start(self):
         """Start the background flush thread."""
         self._running = True
@@ -186,8 +238,28 @@ class ZepGraphMemoryManager:
                     f"total_sent={self._total_sent}, failed={self._failed_count}")
 
     def add_activity(self, activity: AgentActivity):
-        """Add an agent activity to the queue."""
+        """Add an AgentActivity object to the queue."""
         self._queue.put(activity)
+
+    def add_activity_from_dict(self, action_data: Dict[str, Any], platform: str):
+        """
+        Convert a raw action-log dict (as written by the simulation script)
+        into an AgentActivity and add it to the queue.
+        Called by simulation_runner when it reads action-log lines.
+        """
+        try:
+            activity = AgentActivity(
+                platform=platform,
+                agent_id=action_data.get("agent_id", 0),
+                agent_name=action_data.get("agent_name", "Unknown"),
+                action_type=action_data.get("action_type", ""),
+                action_args=action_data.get("action_args", {}),
+                round_num=action_data.get("round", 0),
+                timestamp=action_data.get("timestamp", datetime.now().isoformat()),
+            )
+            self._queue.put(activity)
+        except Exception as e:
+            logger.warning(f"add_activity_from_dict failed: {e}")
 
     def _run(self):
         """Background thread: flush activities periodically."""

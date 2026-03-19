@@ -5,6 +5,9 @@
       <div class="nav-brand">MIROFISH</div>
       <div class="nav-links">
         <router-link to="/setup" class="settings-link">Settings</router-link>
+        <button class="theme-toggle" @click="toggle" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+          {{ isDark ? '☀' : '◑' }}
+        </button>
         <a href="https://github.com/666ghj/MiroFish" target="_blank" class="github-link">
           GitHub <span class="arrow">↗</span>
         </a>
@@ -203,6 +206,9 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
+import { useTheme } from '../store/theme'
+
+const { isDark, toggle } = useTheme()
 
 const router = useRouter()
 
@@ -281,12 +287,7 @@ const startSimulation = () => {
 
 <style scoped>
 :root {
-  --black: #000000;
-  --white: #FFFFFF;
   --orange: #FF4500;
-  --gray-light: #F5F5F5;
-  --gray-text: #666666;
-  --border: #E5E5E5;
   --font-mono: 'JetBrains Mono', monospace;
   --font-sans: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
   --font-cn: 'Noto Sans SC', system-ui, sans-serif;
@@ -294,15 +295,15 @@ const startSimulation = () => {
 
 .home-container {
   min-height: 100vh;
-  background: var(--white);
+  background: var(--c-bg);
   font-family: var(--font-sans);
-  color: var(--black);
+  color: var(--c-text);
 }
 
 .navbar {
   height: 60px;
-  background: var(--black);
-  color: var(--white);
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-text);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -331,11 +332,26 @@ const startSimulation = () => {
 }
 
 .settings-link:hover {
-  color: var(--white);
+  color: var(--c-inverse-text);
+}
+
+.theme-toggle {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: #999;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.theme-toggle:hover {
+  color: var(--c-inverse-text);
 }
 
 .github-link {
-  color: var(--white);
+  color: var(--c-inverse-text);
   text-decoration: none;
   font-family: var(--font-mono);
   font-size: 0.9rem;
@@ -402,11 +418,11 @@ const startSimulation = () => {
   font-weight: 500;
   margin: 0 0 40px 0;
   letter-spacing: -2px;
-  color: var(--black);
+  color: var(--c-text);
 }
 
 .gradient-text {
-  background: linear-gradient(90deg, #000000 0%, #444444 100%);
+  background: linear-gradient(90deg, var(--c-text) 0%, var(--c-text-muted) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   display: inline-block;
@@ -415,7 +431,7 @@ const startSimulation = () => {
 .hero-desc {
   font-size: 1.05rem;
   line-height: 1.8;
-  color: var(--gray-text);
+  color: var(--c-text-muted);
   max-width: 640px;
   margin-bottom: 50px;
   font-weight: 400;
@@ -427,32 +443,32 @@ const startSimulation = () => {
 }
 
 .highlight-bold {
-  color: var(--black);
+  color: var(--c-text);
   font-weight: 700;
 }
 
 .highlight-orange {
-  color: var(--orange);
+  color: var(--c-accent);
   font-weight: 700;
   font-family: var(--font-mono);
 }
 
 .highlight-code {
-  background: rgba(0, 0, 0, 0.05);
+  background: var(--c-surface-2);
   padding: 2px 6px;
   border-radius: 2px;
   font-family: var(--font-mono);
   font-size: 0.9em;
-  color: var(--black);
+  color: var(--c-text);
   font-weight: 600;
 }
 
 .slogan-text {
   font-size: 1.2rem;
   font-weight: 520;
-  color: var(--black);
+  color: var(--c-text);
   letter-spacing: 1px;
-  border-left: 3px solid var(--orange);
+  border-left: 3px solid var(--c-accent);
   padding-left: 15px;
   margin-top: 20px;
 }
@@ -497,25 +513,25 @@ const startSimulation = () => {
 .scroll-down-btn {
   width: 40px;
   height: 40px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border-light);
   background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  color: var(--orange);
+  color: var(--c-accent);
   font-size: 1.2rem;
   transition: all 0.2s;
 }
 
 .scroll-down-btn:hover {
-  border-color: var(--orange);
+  border-color: var(--c-accent);
 }
 
 .dashboard-section {
   display: flex;
   gap: 60px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--c-border-light);
   padding-top: 60px;
   align-items: flex-start;
 }
@@ -533,7 +549,7 @@ const startSimulation = () => {
 .panel-header {
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: #999;
+  color: var(--c-text-muted);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -541,7 +557,7 @@ const startSimulation = () => {
 }
 
 .status-dot {
-  color: var(--orange);
+  color: var(--c-accent);
   font-size: 0.8rem;
 }
 
@@ -552,7 +568,7 @@ const startSimulation = () => {
 }
 
 .section-desc {
-  color: var(--gray-text);
+  color: var(--c-text-muted);
   margin-bottom: 25px;
   line-height: 1.6;
 }
@@ -564,7 +580,7 @@ const startSimulation = () => {
 }
 
 .metric-card {
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border-light);
   padding: 20px 30px;
   min-width: 150px;
 }
@@ -578,11 +594,11 @@ const startSimulation = () => {
 
 .metric-label {
   font-size: 0.85rem;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .steps-container {
-  border: 1px solid var(--border);
+  border: 1px solid var(--c-border-light);
   padding: 30px;
   position: relative;
 }
@@ -590,7 +606,7 @@ const startSimulation = () => {
 .steps-header {
   font-family: var(--font-mono);
   font-size: 0.8rem;
-  color: #999;
+  color: var(--c-text-muted);
   margin-bottom: 25px;
   display: flex;
   align-items: center;
@@ -617,7 +633,7 @@ const startSimulation = () => {
 .step-num {
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--black);
+  color: var(--c-text);
   opacity: 0.3;
 }
 
@@ -633,7 +649,7 @@ const startSimulation = () => {
 
 .step-desc {
   font-size: 0.85rem;
-  color: var(--gray-text);
+  color: var(--c-text-muted);
 }
 
 .right-panel {
@@ -641,8 +657,9 @@ const startSimulation = () => {
 }
 
 .console-box {
-  border: 1px solid #CCC;
+  border: 1px solid var(--c-border-light);
   padding: 8px;
+  background: var(--c-surface);
 }
 
 .console-section {
@@ -659,11 +676,11 @@ const startSimulation = () => {
   margin-bottom: 15px;
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  color: #666;
+  color: var(--c-text-muted);
 }
 
 .upload-zone {
-  border: 1px dashed #CCC;
+  border: 1px dashed var(--c-border-light);
   height: 200px;
   overflow-y: auto;
   display: flex;
@@ -671,7 +688,7 @@ const startSimulation = () => {
   justify-content: center;
   cursor: pointer;
   transition: all 0.3s;
-  background: #FAFAFA;
+  background: var(--c-surface-2);
 }
 
 .upload-zone.has-files {
@@ -679,8 +696,8 @@ const startSimulation = () => {
 }
 
 .upload-zone:hover {
-  background: #F0F0F0;
-  border-color: #999;
+  background: var(--c-surface-3);
+  border-color: var(--c-text-muted);
 }
 
 .upload-placeholder {
@@ -690,24 +707,25 @@ const startSimulation = () => {
 .upload-icon {
   width: 40px;
   height: 40px;
-  border: 1px solid #DDD;
+  border: 1px solid var(--c-border-light);
   display: flex;
   align-items: center;
   justify-content: center;
   margin: 0 auto 15px;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .upload-title {
   font-weight: 500;
   font-size: 0.9rem;
   margin-bottom: 5px;
+  color: var(--c-text);
 }
 
 .upload-hint {
   font-family: var(--font-mono);
   font-size: 0.75rem;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .file-list {
@@ -721,11 +739,12 @@ const startSimulation = () => {
 .file-item {
   display: flex;
   align-items: center;
-  background: var(--white);
+  background: var(--c-surface);
   padding: 8px 12px;
-  border: 1px solid #EEE;
+  border: 1px solid var(--c-border-light);
   font-family: var(--font-mono);
   font-size: 0.85rem;
+  color: var(--c-text);
 }
 
 .file-name {
@@ -738,7 +757,7 @@ const startSimulation = () => {
   border: none;
   cursor: pointer;
   font-size: 1.2rem;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .console-divider {
@@ -752,21 +771,21 @@ const startSimulation = () => {
   content: '';
   flex: 1;
   height: 1px;
-  background: #EEE;
+  background: var(--c-border-light);
 }
 
 .console-divider span {
   padding: 0 15px;
   font-family: var(--font-mono);
   font-size: 0.7rem;
-  color: #BBB;
+  color: var(--c-text-muted);
   letter-spacing: 1px;
 }
 
 .input-wrapper {
   position: relative;
-  border: 1px solid #DDD;
-  background: #FAFAFA;
+  border: 1px solid var(--c-border-light);
+  background: var(--c-surface-2);
 }
 
 .code-input {
@@ -780,6 +799,7 @@ const startSimulation = () => {
   resize: vertical;
   outline: none;
   min-height: 150px;
+  color: var(--c-text);
 }
 
 .model-badge {
@@ -788,13 +808,13 @@ const startSimulation = () => {
   right: 15px;
   font-family: var(--font-mono);
   font-size: 0.7rem;
-  color: #AAA;
+  color: var(--c-text-muted);
 }
 
 .start-engine-btn {
   width: 100%;
-  background: var(--black);
-  color: var(--white);
+  background: var(--c-inverse-bg);
+  color: var(--c-inverse-text);
   border: none;
   padding: 20px;
   font-family: var(--font-mono);
@@ -811,15 +831,16 @@ const startSimulation = () => {
 }
 
 .start-engine-btn:not(:disabled) {
-  background: var(--black);
-  border: 1px solid var(--black);
+  background: var(--c-inverse-bg);
+  border: 1px solid var(--c-inverse-bg);
   animation: pulse-border 2s infinite;
 }
 
 .start-engine-btn:hover:not(:disabled) {
-  background: var(--orange);
-  border-color: var(--orange);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
   transform: translateY(-2px);
+  box-shadow: 0 0 12px rgba(255, 107, 0, 0.3);
 }
 
 .start-engine-btn:active:not(:disabled) {
@@ -827,15 +848,15 @@ const startSimulation = () => {
 }
 
 .start-engine-btn:disabled {
-  background: #E5E5E5;
-  color: #999;
+  background: var(--c-surface-3);
+  color: var(--c-text-muted);
   cursor: not-allowed;
   transform: none;
-  border: 1px solid #E5E5E5;
+  border: 1px solid var(--c-border-light);
 }
 
 @keyframes pulse-border {
-  0% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0.2); }
+  0% { box-shadow: 0 0 0 0 var(--c-shadow); }
   70% { box-shadow: 0 0 0 6px rgba(0, 0, 0, 0); }
   100% { box-shadow: 0 0 0 0 rgba(0, 0, 0, 0); }
 }

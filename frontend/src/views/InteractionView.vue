@@ -30,6 +30,10 @@
           <span class="dot"></span>
           {{ statusText }}
         </span>
+        <div class="step-divider"></div>
+        <button class="theme-toggle-btn" @click="toggle" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'">
+          {{ isDark ? '☀' : '◑' }}
+        </button>
       </div>
     </header>
 
@@ -64,6 +68,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useTheme } from '../store/theme'
 import GraphPanel from '../components/GraphPanel.vue'
 import Step5Interaction from '../components/Step5Interaction.vue'
 import { getProject, getGraphData } from '../api/graph'
@@ -72,6 +77,7 @@ import { getReport } from '../api/report'
 
 const route = useRoute()
 const router = useRouter()
+const { isDark, toggle } = useTheme()
 
 // Props
 const props = defineProps({
@@ -218,7 +224,7 @@ onMounted(() => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #FFF;
+  background: var(--c-bg);
   overflow: hidden;
   font-family: 'Space Grotesk', 'Noto Sans SC', system-ui, sans-serif;
 }
@@ -226,12 +232,12 @@ onMounted(() => {
 /* Header */
 .app-header {
   height: 60px;
-  border-bottom: 1px solid #EAEAEA;
+  border-bottom: 1px solid var(--c-border-light);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
-  background: #FFF;
+  background: var(--c-bg);
   z-index: 100;
   position: relative;
 }
@@ -264,16 +270,16 @@ onMounted(() => {
   padding: 6px 16px;
   font-size: 12px;
   font-weight: 600;
-  color: #666;
+  color: var(--c-text-muted);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .switch-btn.active {
-  background: #FFF;
-  color: #000;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  background: var(--c-surface);
+  color: var(--c-text);
+  box-shadow: 0 2px 4px var(--c-shadow);
 }
 
 .header-right {
@@ -292,18 +298,18 @@ onMounted(() => {
 .step-num {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .step-name {
   font-weight: 700;
-  color: #000;
+  color: var(--c-text);
 }
 
 .step-divider {
   width: 1px;
   height: 14px;
-  background-color: #E0E0E0;
+  background-color: var(--c-border-light);
 }
 
 .status-indicator {
@@ -311,7 +317,7 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #666;
+  color: var(--c-text-muted);
   font-weight: 500;
 }
 
@@ -345,6 +351,21 @@ onMounted(() => {
 }
 
 .panel-wrapper.left {
-  border-right: 1px solid #EAEAEA;
+  border-right: 1px solid var(--c-border-light);
+}
+
+.theme-toggle-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--c-text-muted);
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.2s;
+}
+
+.theme-toggle-btn:hover {
+  color: var(--c-text);
 }
 </style>

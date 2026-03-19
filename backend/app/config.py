@@ -1,6 +1,6 @@
 """
 Configuration management.
-Loads from .env file, then overrides with settings.json if available.
+Priority (highest → lowest): .env file → settings.json → hardcoded defaults.
 """
 
 import os
@@ -65,17 +65,24 @@ class Config:
 
     @classmethod
     def reload_from_settings(cls):
-        """Reload configuration from settings.json, falling back to .env values."""
+        """
+        Reload configuration with .env as the highest priority source.
+        Priority: .env > settings.json > hardcoded defaults.
+        settings.json only fills keys that are NOT explicitly set in .env.
+        """
         from .settings import load_settings, migrate_from_env
         migrate_from_env()
         settings = load_settings()
-        if settings.get("llm_api_key"):
+        # Only apply settings.json value when the env var is absent from the environment.
+        # load_dotenv() already populated os.environ from .env, so checking os.environ
+        # is sufficient to determine whether .env defined a key.
+        if not os.environ.get('LLM_API_KEY') and settings.get("llm_api_key"):
             cls.LLM_API_KEY = settings["llm_api_key"]
-        if settings.get("llm_base_url"):
+        if not os.environ.get('LLM_BASE_URL') and settings.get("llm_base_url"):
             cls.LLM_BASE_URL = settings["llm_base_url"]
-        if settings.get("llm_model_name"):
+        if not os.environ.get('LLM_MODEL_NAME') and settings.get("llm_model_name"):
             cls.LLM_MODEL_NAME = settings["llm_model_name"]
-        if settings.get("ollama_embed_model"):
+        if not os.environ.get('OLLAMA_EMBED_MODEL') and settings.get("ollama_embed_model"):
             cls.OLLAMA_EMBED_MODEL = settings["ollama_embed_model"]
 
     @classmethod

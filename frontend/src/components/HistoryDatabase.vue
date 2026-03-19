@@ -958,7 +958,7 @@ onUnmounted(() => {
   left: 0;
   height: 2px;
   width: 0;
-  background-color: #000;
+  background-color: var(--c-accent);
   transition: width 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   z-index: 20;
 }
@@ -1099,7 +1099,7 @@ onUnmounted(() => {
   font-weight: 600;
   padding: 4px 8px;
   border-radius: 4px;
-  background: #F9FAFB;
+  background: var(--c-surface-2);
 }
 
 .modal-progress.completed { color: #10B981; background: rgba(16, 185, 129, 0.1); }
@@ -1161,7 +1161,7 @@ onUnmounted(() => {
   color: #374151;
   line-height: 1.6;
   padding: 16px;
-  background: #F9FAFB;
+  background: var(--c-surface-2);
   border: 1px solid #F3F4F6;
   border-radius: 8px;
 }
@@ -1223,7 +1223,7 @@ onUnmounted(() => {
   font-size: 0.85rem;
   color: #9CA3AF;
   padding: 16px;
-  background: #F9FAFB;
+  background: var(--c-surface-2);
   border: 1px dashed #E5E7EB;
   border-radius: 6px;
   text-align: center;
@@ -1278,7 +1278,7 @@ onUnmounted(() => {
 }
 
 .modal-btn:hover:not(:disabled) {
-  border-color: #000000;
+  border-color: var(--c-border);
   transform: translateY(-2px);
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
 }
@@ -1286,7 +1286,7 @@ onUnmounted(() => {
 .modal-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-  background: #F9FAFB;
+  background: var(--c-surface-2);
 }
 
 .btn-step {
