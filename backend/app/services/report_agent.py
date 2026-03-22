@@ -1344,14 +1344,14 @@ class ReportAgent:
             tools_description=self._get_tools_description(),
         )
 
-        # Build user prompt - each completed section truncated to max 4000 chars
+        # Build user prompt - summarize previous sections to avoid quadratic growth
         if previous_sections:
             previous_parts = []
-            for sec in previous_sections:
-                # Max 4000 chars per section
-                truncated = sec[:4000] + "..." if len(sec) > 4000 else sec
-                previous_parts.append(truncated)
-            previous_content = "\n\n---\n\n".join(previous_parts)
+            for i, sec in enumerate(previous_sections):
+                # Only keep first 300 chars as summary to save tokens
+                summary = sec[:300].rsplit(' ', 1)[0] + "..." if len(sec) > 300 else sec
+                previous_parts.append(f"[Section {i+1} summary]: {summary}")
+            previous_content = "\n".join(previous_parts)
         else:
             previous_content = "(This is the first section)"
 
@@ -1467,7 +1467,7 @@ class ReportAgent:
                         "role": "user",
                         "content": REACT_OBSERVATION_TEMPLATE.format(
                             tool_name="insight_forge",
-                            result=bootstrap_result,
+                            result=bootstrap_result[:1500] if len(bootstrap_result) > 1500 else bootstrap_result,
                             tool_calls_count=tool_calls_count,
                             max_tool_calls=self.MAX_TOOL_CALLS_PER_SECTION,
                             used_tools_str=", ".join(sorted(used_tools)),
@@ -1628,7 +1628,7 @@ class ReportAgent:
                     )
 
                 # Truncate tool result to prevent context overflow
-                truncated_result = result[:3000] if len(result) > 3000 else result
+                truncated_result = result[:1500] if len(result) > 1500 else result
 
                 tool_calls_count += 1
                 used_tools.add(call['name'])
@@ -1991,9 +1991,11 @@ class ReportAgent:
         except Exception as e:
             logger.warning(f"Failed to retrieve report content: {e}")
 
+        # Cap report content to save tokens in chat turns
+        capped_report = report_content[:3000] + "\n...(truncated)" if report_content and len(report_content) > 3000 else report_content
         system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,
-            report_content=report_content if report_content else "(No report available)",
+            report_content=capped_report if capped_report else "(No report available)",
             tools_description=self._get_tools_description(),
         )
 
