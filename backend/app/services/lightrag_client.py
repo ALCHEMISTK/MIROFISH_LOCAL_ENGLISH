@@ -24,6 +24,90 @@ _rag_instances: Dict[str, object] = {}
 _rag_lock = threading.Lock()
 
 
+class AdaptiveRateLimiter:
+    """
+    AIMD-style adaptive rate limiter (like TCP congestion control).
+    Starts at max concurrency and dynamically finds the provider's limit.
+
+    - On success streak: additive increase (+1 concurrency)
+    - On 429/rate-limit: multiplicative decrease (halve concurrency + cooldown)
+    """
+
+    def __init__(self, max_concurrency: int = 16, min_concurrency: int = 1):
+        self._max = max_concurrency
+        self._min = min_concurrency
+        self._current = max_concurrency
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._lock = asyncio.Lock()
+        self._consecutive_success = 0
+        self._success_threshold = 5  # successes before increasing
+        self._cooldown_seconds = 2.0
+        self._last_decrease_time = 0.0
+        import time as _t
+        self._time = _t
+
+    async def acquire(self):
+        await self._semaphore.acquire()
+
+    def release(self):
+        self._semaphore.release()
+
+    async def on_success(self):
+        async with self._lock:
+            self._consecutive_success += 1
+            if self._consecutive_success >= self._success_threshold and self._current < self._max:
+                self._current += 1
+                self._consecutive_success = 0
+                # Add a permit to the semaphore
+                self._semaphore.release()
+                logger.debug(f"Rate limiter: increased concurrency to {self._current}")
+
+    async def on_rate_limit(self):
+        async with self._lock:
+            self._consecutive_success = 0
+            now = self._time.time()
+            # Don't decrease too rapidly
+            if now - self._last_decrease_time < 2.0:
+                return self._cooldown_seconds
+            self._last_decrease_time = now
+
+            old = self._current
+            self._current = max(self._min, self._current // 2)
+            # Drain excess permits by acquiring without releasing
+            for _ in range(old - self._current):
+                try:
+                    self._semaphore.acquire_nowait()
+                except Exception:
+                    break
+
+            # Increase cooldown when we're already at minimum
+            if self._current == self._min:
+                self._cooldown_seconds = min(self._cooldown_seconds * 1.5, 30.0)
+            else:
+                self._cooldown_seconds = max(2.0, self._cooldown_seconds * 0.8)
+
+            logger.info(
+                f"Rate limiter: decreased concurrency {old} → {self._current}, "
+                f"cooldown={self._cooldown_seconds:.1f}s"
+            )
+            return self._cooldown_seconds
+
+    @property
+    def current_concurrency(self):
+        return self._current
+
+
+# Shared rate limiter for cloud API calls (LLM + embeddings)
+_cloud_rate_limiter: Optional[AdaptiveRateLimiter] = None
+
+
+def _get_rate_limiter() -> AdaptiveRateLimiter:
+    global _cloud_rate_limiter
+    if _cloud_rate_limiter is None:
+        _cloud_rate_limiter = AdaptiveRateLimiter(max_concurrency=16, min_concurrency=1)
+    return _cloud_rate_limiter
+
+
 def _is_local_ollama(base_url: str) -> bool:
     """Return True when the configured LLM base URL points to a local Ollama host."""
     try:
@@ -77,13 +161,14 @@ def build_lightrag_llm_binding():
         if use_if_cache:
             call_kwargs["model"] = model or Config.LLM_MODEL_NAME
 
-        # Retry with exponential backoff on rate-limit / retry errors.
-        # LightRAG's internal tenacity retries are too short (~0.3-1s);
-        # this outer loop waits longer so the quota can recover.
-        max_attempts = 6
+        limiter = _get_rate_limiter()
+        max_attempts = 8
         for attempt in range(1, max_attempts + 1):
+            await limiter.acquire()
             try:
-                return await openai_llm_complete(**call_kwargs)
+                result = await openai_llm_complete(**call_kwargs)
+                await limiter.on_success()
+                return result
             except Exception as e:
                 from tenacity import RetryError
                 from openai import RateLimitError
@@ -92,12 +177,15 @@ def build_lightrag_llm_binding():
                     raise
                 if attempt == max_attempts:
                     raise
-                wait = min(2 ** attempt, 60)  # 2, 4, 8, 16, 32, 60s
+                cooldown = await limiter.on_rate_limit()
                 logger.warning(
                     f"Rate limited (attempt {attempt}/{max_attempts}), "
-                    f"waiting {wait}s before retry..."
+                    f"concurrency={limiter.current_concurrency}, "
+                    f"waiting {cooldown:.1f}s..."
                 )
-                await asyncio.sleep(wait)
+                await asyncio.sleep(cooldown)
+            finally:
+                limiter.release()
 
     return cloud_llm_func, {}
 
@@ -354,22 +442,32 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 async def _embed(texts, **_kwargs):
                     import numpy as np
                     from openai import AsyncOpenAI
-                    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-                    resp = await client.embeddings.create(model=embed_model, input=texts)
-                    return np.array(
-                        [d.embedding for d in resp.data], dtype=np.float32
-                    )
+                    limiter = _get_rate_limiter()
+                    await limiter.acquire()
+                    try:
+                        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+                        resp = await client.embeddings.create(model=embed_model, input=texts)
+                        await limiter.on_success()
+                        return np.array(
+                            [d.embedding for d in resp.data], dtype=np.float32
+                        )
+                    except Exception:
+                        await limiter.on_rate_limit()
+                        raise
+                    finally:
+                        limiter.release()
 
-            # Reduce concurrency for cloud APIs to avoid rate limits.
-            # Ollama (local) can handle high parallelism; cloud APIs cannot.
+            # LightRAG concurrency settings.
+            # For cloud APIs, we start with moderate concurrency and let the
+            # AdaptiveRateLimiter dynamically find the optimal throughput.
             concurrency_kwargs = {}
             if not use_local_ollama:
                 concurrency_kwargs = {
-                    "llm_model_max_async": 2,
-                    "max_parallel_insert": 1,
-                    "embedding_func_max_async": 4,
+                    "llm_model_max_async": 8,
+                    "max_parallel_insert": 2,
+                    "embedding_func_max_async": 8,
                 }
-                logger.info("Cloud API detected — throttling concurrency to avoid rate limits")
+                logger.info("Cloud API: starting with adaptive rate limiting (max concurrency=16)")
 
             rag = LightRAG(
                 working_dir=working_dir,
