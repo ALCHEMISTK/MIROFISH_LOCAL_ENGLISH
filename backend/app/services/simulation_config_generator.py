@@ -214,7 +214,7 @@ class SimulationConfigGenerator:
     # Maximum context characters
     MAX_CONTEXT_LENGTH = 20000
     # Number of agents per batch
-    AGENTS_PER_BATCH = 15
+    AGENTS_PER_BATCH = 5
 
     # Context truncation lengths per step (characters)
     TIME_CONFIG_CONTEXT_LENGTH = 6000    # Time configuration
@@ -449,7 +449,7 @@ class SimulationConfigGenerator:
                     ],
                     response_format={"type": "json_object"},
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
-                    max_tokens=2048,
+                    max_tokens=4096,
                 )
 
                 content = response.choices[0].message.content
