@@ -16,6 +16,7 @@ from typing import Dict, Any, List, Optional, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from collections import deque
 from queue import Queue
 
 from ..config import Config
@@ -129,7 +130,7 @@ class SimulationRunState:
     rounds: List[RoundSummary] = field(default_factory=list)
 
     # Recent actions (for real-time frontend display)
-    recent_actions: List[AgentAction] = field(default_factory=list)
+    recent_actions: deque = field(default_factory=lambda: deque(maxlen=50))
     max_recent_actions: int = 50
 
     # Timestamps
@@ -145,9 +146,7 @@ class SimulationRunState:
 
     def add_action(self, action: AgentAction):
         """Add action to recent actions list"""
-        self.recent_actions.insert(0, action)
-        if len(self.recent_actions) > self.max_recent_actions:
-            self.recent_actions = self.recent_actions[:self.max_recent_actions]
+        self.recent_actions.appendleft(action)
 
         if action.platform == "twitter":
             self.twitter_actions_count += 1
@@ -215,6 +214,9 @@ class SimulationRunner:
         '../../scripts'
     )
 
+    # Thread lock for class-level state dicts
+    _lock = threading.Lock()
+
     # In-memory run states
     _run_states: Dict[str, SimulationRunState] = {}
     _processes: Dict[str, subprocess.Popen] = {}
@@ -228,9 +230,10 @@ class SimulationRunner:
 
     @classmethod
     def get_run_state(cls, simulation_id: str) -> Optional[SimulationRunState]:
-        """Get run state"""
-        if simulation_id in cls._run_states:
-            return cls._run_states[simulation_id]
+        """Get run state (thread-safe)"""
+        with cls._lock:
+            if simulation_id in cls._run_states:
+                return cls._run_states[simulation_id]
 
         # Try to load from file
         state = cls._load_run_state(simulation_id)
@@ -296,17 +299,21 @@ class SimulationRunner:
 
     @classmethod
     def _save_run_state(cls, state: SimulationRunState):
-        """Save run state to file"""
+        """Save run state to file (thread-safe, atomic write)"""
         sim_dir = os.path.join(cls.RUN_STATE_DIR, state.simulation_id)
         os.makedirs(sim_dir, exist_ok=True)
         state_file = os.path.join(sim_dir, "run_state.json")
+        tmp_file = state_file + ".tmp"
 
         data = state.to_detail_dict()
 
-        with open(state_file, 'w', encoding='utf-8') as f:
+        # Atomic write: write to temp file, then rename
+        with open(tmp_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_file, state_file)
 
-        cls._run_states[state.simulation_id] = state
+        with cls._lock:
+            cls._run_states[state.simulation_id] = state
 
     @classmethod
     def start_simulation(
@@ -689,30 +696,22 @@ class SimulationRunner:
     @classmethod
     def _check_all_platforms_completed(cls, state: SimulationRunState) -> bool:
         """
-        Check whether all enabled platforms have completed simulation
+        Check whether all enabled platforms have completed simulation.
 
-        Determines which platforms are enabled by checking whether the corresponding
-        actions.jsonl files exist.
+        Uses the running flags set at start time (not file existence, which
+        can race if a platform is slow to create its log file).
 
         Returns:
-            True if all enabled platforms have completed
+            True if all running platforms have completed
         """
-        sim_dir = os.path.join(cls.RUN_STATE_DIR, state.simulation_id)
-        twitter_log = os.path.join(sim_dir, "twitter", "actions.jsonl")
-        reddit_log = os.path.join(sim_dir, "reddit", "actions.jsonl")
-
-        # Check which platforms are enabled (determined by file existence)
-        twitter_enabled = os.path.exists(twitter_log)
-        reddit_enabled = os.path.exists(reddit_log)
-
-        # If a platform is enabled but not completed, return False
-        if twitter_enabled and not state.twitter_completed:
+        # If a platform was started but not completed, return False
+        if state.twitter_running and not state.twitter_completed:
             return False
-        if reddit_enabled and not state.reddit_completed:
+        if state.reddit_running and not state.reddit_completed:
             return False
 
-        # At least one platform is enabled and completed
-        return twitter_enabled or reddit_enabled
+        # At least one platform was running and has completed
+        return state.twitter_running or state.reddit_running
 
     @classmethod
     def _terminate_process(cls, process: subprocess.Popen, simulation_id: str, timeout: int = 10):

@@ -408,6 +408,7 @@ def build_graph():
 
                 # Add text (progress_callback signature is (msg, progress_ratio))
                 def add_progress_callback(msg, progress_ratio):
+                    progress_ratio = max(0.0, min(1.0, float(progress_ratio or 0)))
                     progress = 15 + int(progress_ratio * 75)  # 15% - 90%
                     task_manager.update_task(
                         task_id,

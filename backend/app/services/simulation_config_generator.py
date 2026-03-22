@@ -591,7 +591,8 @@ Field descriptions:
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
         except Exception as e:
-            logger.warning(f"Time config LLM generation failed: {e}, using default config")
+            logger.warning(f"Time config LLM generation failed: {e}, using default config. "
+                           "Simulation will use generic parameters instead of optimized ones.")
             return self._get_default_time_config(num_entities)
 
     def _get_default_time_config(self, num_entities: int) -> Dict[str, Any]:
@@ -707,7 +708,8 @@ Return JSON format (no markdown):
         try:
             return self._call_llm_with_retry(prompt, system_prompt)
         except Exception as e:
-            logger.warning(f"Event config LLM generation failed: {e}, using default config")
+            logger.warning(f"Event config LLM generation failed: {e}, using default config. "
+                           "Simulation events will be generic.")
             return {
                 "hot_topics": [],
                 "narrative_direction": "",

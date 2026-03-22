@@ -1627,6 +1627,9 @@ class ReportAgent:
                         iteration=iteration + 1
                     )
 
+                # Truncate tool result to prevent context overflow
+                truncated_result = result[:3000] if len(result) > 3000 else result
+
                 tool_calls_count += 1
                 used_tools.add(call['name'])
 
@@ -1641,7 +1644,7 @@ class ReportAgent:
                     "role": "user",
                     "content": REACT_OBSERVATION_TEMPLATE.format(
                         tool_name=call["name"],
-                        result=result,
+                        result=truncated_result,
                         tool_calls_count=tool_calls_count,
                         max_tool_calls=self.MAX_TOOL_CALLS_PER_SECTION,
                         used_tools_str=", ".join(used_tools),
@@ -1926,7 +1929,7 @@ class ReportAgent:
             return report
 
         except Exception as e:
-            logger.error(f"Report generation failed: {str(e)}")
+            logger.error(f"Report generation failed: {str(e)}", exc_info=True)
             report.status = ReportStatus.FAILED
             report.error = str(e)
 

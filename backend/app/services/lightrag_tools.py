@@ -267,6 +267,27 @@ class ZepToolsService:
 
     def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
         self._llm_client = llm_client
+        self._graph_cache: Dict[str, Any] = {}  # graph_id -> (graph, timestamp)
+
+    def _get_graph(self, graph_id: str):
+        """Load and cache GraphML to avoid repeated disk reads."""
+        import time as _time
+        cache_ttl = 60  # seconds
+        if graph_id in self._graph_cache:
+            graph, ts = self._graph_cache[graph_id]
+            if _time.time() - ts < cache_ttl:
+                return graph
+
+        graphml_path = os.path.join(get_working_dir(graph_id), "graph_chunk_entity_relation.graphml")
+        if not os.path.exists(graphml_path):
+            return None
+        try:
+            graph = nx.read_graphml(graphml_path)
+            self._graph_cache[graph_id] = (graph, _time.time())
+            return graph
+        except Exception as e:
+            logger.warning(f"Could not read GraphML for {graph_id}: {e}")
+            return None
 
     @property
     def llm(self) -> LLMClient:
@@ -316,22 +337,8 @@ class ZepToolsService:
           global -> full graph overview
           naive  -> quick keyword match, minimal context
         """
-        import networkx as nx
-
-        working_dir = get_working_dir(graph_id)
-        graphml_path = os.path.join(working_dir, "graph_chunk_entity_relation.graphml")
-
-        if not os.path.exists(graphml_path):
-            logger.warning(f"GraphML not found for graph_id={graph_id}: {graphml_path}")
-            return ""
-
-        try:
-            G = nx.read_graphml(graphml_path)
-        except Exception as e:
-            logger.warning(f"Could not read GraphML for {graph_id}: {e}")
-            return ""
-
-        if G.number_of_nodes() == 0:
+        G = self._get_graph(graph_id)
+        if G is None or G.number_of_nodes() == 0:
             return ""
 
         node_limit = self._MODE_NODE_LIMIT.get(mode, 15)
@@ -429,7 +436,6 @@ class ZepToolsService:
         except Exception as e:
             logger.warning(f"_query_rag LLM synthesis failed, returning raw context: {e}")
             return context
-            return ""
 
     def _parse_facts(self, text: str, limit: int = 20) -> List[str]:
         """Parse LightRAG text output into a list of fact strings."""
@@ -523,15 +529,11 @@ class ZepToolsService:
         Full graph snapshot — reads all nodes and edges from the GraphML file.
         Also runs a global LightRAG query to get a community-level summary.
         """
-        import networkx as nx
-        working_dir = get_working_dir(graph_id)
-        graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
-
         nodes_info: List[NodeInfo] = []
         edges_info: List[EdgeInfo] = []
 
-        if os.path.exists(graphml_path):
-            G = nx.read_graphml(graphml_path)
+        G = self._get_graph(graph_id)
+        if G is not None:
             node_name_map: Dict[str, str] = {}
 
             for node_id, data in G.nodes(data=True):
@@ -598,12 +600,9 @@ class ZepToolsService:
 
     def get_all_nodes(self, graph_id: str) -> List[NodeInfo]:
         """Return all nodes from the graph."""
-        import networkx as nx
-        working_dir = get_working_dir(graph_id)
-        graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
-        if not os.path.exists(graphml_path):
+        G = self._get_graph(graph_id)
+        if G is None:
             return []
-        G = nx.read_graphml(graphml_path)
         return [
             NodeInfo(
                 uuid=nid,
@@ -617,12 +616,9 @@ class ZepToolsService:
 
     def get_all_edges(self, graph_id: str) -> List[EdgeInfo]:
         """Return all edges from the graph."""
-        import networkx as nx
-        working_dir = get_working_dir(graph_id)
-        graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
-        if not os.path.exists(graphml_path):
+        G = self._get_graph(graph_id)
+        if G is None:
             return []
-        G = nx.read_graphml(graphml_path)
         node_name_map = {nid: d.get('entity_name', nid) for nid, d in G.nodes(data=True)}
         return [
             EdgeInfo(
@@ -639,12 +635,9 @@ class ZepToolsService:
 
     def get_node_edges(self, graph_id: str, node_uuid: str) -> List[EdgeInfo]:
         """Return edges incident to the given node."""
-        import networkx as nx
-        working_dir = get_working_dir(graph_id)
-        graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
-        if not os.path.exists(graphml_path):
+        G = self._get_graph(graph_id)
+        if G is None:
             return []
-        G = nx.read_graphml(graphml_path)
         node_name_map = {nid: d.get('entity_name', nid) for nid, d in G.nodes(data=True)}
         results = []
         for src, tgt, data in G.edges(data=True):

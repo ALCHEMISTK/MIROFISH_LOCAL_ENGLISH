@@ -18,6 +18,17 @@ from ..models.project import ProjectManager
 
 logger = get_logger('mirofish.api.simulation')
 
+import re
+
+_SAFE_ID_PATTERN = re.compile(r'^[a-zA-Z0-9_\-]{1,128}$')
+
+
+def _validate_id(value: str, name: str = "id") -> str:
+    """Validate that an ID is safe (no path traversal)."""
+    if not value or not _SAFE_ID_PATTERN.match(value):
+        raise ValueError(f"Invalid {name}: must be alphanumeric/underscore/hyphen, 1-128 chars")
+    return value
+
 
 # Interview prompt optimization prefix
 # Adding this prefix prevents the Agent from calling tools and forces a direct text reply
@@ -181,6 +192,10 @@ def create_simulation():
                 "success": False,
                 "error": "Please provide project_id"
             }), 400
+        try:
+            _validate_id(project_id, "project_id")
+        except ValueError as e:
+            return jsonify({"success": False, "error": str(e)}), 400
 
         project = ProjectManager.get_project(project_id)
         if not project:

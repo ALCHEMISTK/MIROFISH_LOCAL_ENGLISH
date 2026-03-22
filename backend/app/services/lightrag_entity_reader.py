@@ -62,15 +62,30 @@ class FilteredEntities:
         }
 
 
+import time as _time
+
+_graph_cache: Dict[str, Any] = {}  # graph_id -> (graph, timestamp)
+_GRAPH_CACHE_TTL = 60  # seconds
+
+
 def _load_graph(graph_id: str):
-    """Read the LightRAG GraphML file for a given graph_id. Returns empty Graph if not found."""
+    """Read the LightRAG GraphML file for a given graph_id. Returns empty Graph if not found.
+    Results are cached for 60 seconds to avoid repeated disk reads."""
     import networkx as nx
+
+    if graph_id in _graph_cache:
+        graph, ts = _graph_cache[graph_id]
+        if _time.time() - ts < _GRAPH_CACHE_TTL:
+            return graph
+
     working_dir = get_working_dir(graph_id)
     graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
     if not os.path.exists(graphml_path):
         logger.warning(f"GraphML not found for graph_id={graph_id}: {graphml_path}")
         return nx.Graph()
-    return nx.read_graphml(graphml_path)
+    graph = nx.read_graphml(graphml_path)
+    _graph_cache[graph_id] = (graph, _time.time())
+    return graph
 
 
 class ZepEntityReader:

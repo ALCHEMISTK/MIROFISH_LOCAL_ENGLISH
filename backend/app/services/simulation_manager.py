@@ -128,11 +128,14 @@ class SimulationManager:
         '../../uploads/simulations'
     )
 
+    # Maximum cached simulation states to prevent unbounded memory growth
+    MAX_CACHED_STATES = 100
+
     def __init__(self):
         # Ensure directory exists
         os.makedirs(self.SIMULATION_DATA_DIR, exist_ok=True)
 
-        # In-memory simulation state cache
+        # In-memory simulation state cache (bounded)
         self._simulations: Dict[str, SimulationState] = {}
 
     def _get_simulation_dir(self, simulation_id: str) -> str:
@@ -152,6 +155,15 @@ class SimulationManager:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
 
         self._simulations[state.simulation_id] = state
+
+        # Evict oldest entries if cache grows too large
+        if len(self._simulations) > self.MAX_CACHED_STATES:
+            oldest = sorted(
+                self._simulations.values(),
+                key=lambda s: s.updated_at or ""
+            )
+            for s in oldest[:len(self._simulations) - self.MAX_CACHED_STATES]:
+                self._simulations.pop(s.simulation_id, None)
 
     def _load_simulation_state(self, simulation_id: str) -> Optional[SimulationState]:
         """Load simulation state from file"""

@@ -792,8 +792,16 @@ def get_agent_log(report_id: str):
     """
     try:
         from_line = request.args.get('from_line', 0, type=int)
+        limit = request.args.get('limit', 200, type=int)
+        limit = min(limit, 500)  # Cap at 500 to prevent memory spikes
 
         log_data = ReportManager.get_agent_log(report_id, from_line=from_line)
+
+        # Apply limit to log entries if present
+        if isinstance(log_data, dict) and "logs" in log_data:
+            log_data["logs"] = log_data["logs"][:limit]
+        elif isinstance(log_data, list):
+            log_data = log_data[:limit]
 
         return jsonify({
             "success": True,

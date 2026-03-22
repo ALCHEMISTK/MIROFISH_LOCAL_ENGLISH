@@ -199,7 +199,9 @@ class GraphBuilderService:
     def set_ontology(self, graph_id: str, ontology: Dict[str, Any]):
         """
         Save ontology as extraction hints JSON.
-        LightRAG uses these as context hints during entity extraction.
+        Note: LightRAG's extraction pipeline uses its own entity types internally.
+        These hints are saved for reference and used by the entity deduplication
+        and profile generation steps, but do not directly control LightRAG extraction.
         """
         working_dir = get_working_dir(graph_id)
         hints_path = os.path.join(working_dir, "extraction_hints.json")
