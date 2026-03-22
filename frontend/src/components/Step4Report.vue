@@ -739,7 +739,7 @@ const parseInterview = (text) => {
         // Format 2: - Selected name（index X）: reason
         // e.g.: - Selected Parent_601（index 0）: As a representative of the parent group...
         if (!headerMatch) {
-          headerMatch = line.match(/^-\s*(?:Selected\s+|选择)([^（(]+)(?:[（(]index\s*=?\s*\d+[)）])?[：:]\s*(.*)/)
+          headerMatch = line.match(/^-\s*Selected\s+([^（(]+)(?:[（(]index\s*=?\s*\d+[)）])?[：:]\s*(.*)/)
           if (headerMatch) {
             name = headerMatch[1].trim()
             reasonStart = headerMatch[2]
@@ -764,7 +764,7 @@ const parseInterview = (text) => {
           // Start a new person
           currentName = name
           currentReason = reasonStart ? [reasonStart.trim()] : []
-        } else if (currentName && line.trim() && !line.match(/^Not selected|^未选|^In conclusion|^综上|^Final selection|^最终选择/)) {
+        } else if (currentName && line.trim() && !line.match(/^Not selected|^In conclusion|^Final selection/)) {
           // Continuation of the reason (excluding trailing summary paragraphs)
           currentReason.push(line.trim())
         }
@@ -1327,7 +1327,7 @@ const InterviewDisplay = {
     const isPlaceholderText = (text) => {
       if (!text) return true
       const t = text.trim()
-      return t === '（该平台未获得回复）' || t === '(该平台未获得回复)' || t === '[无回复]' || t === '(No response from this platform)'
+      return t === '(No response from this platform)' || t === '[No response]'
     }
 
     // Attempt to split the answer by question number
@@ -1336,13 +1336,13 @@ const InterviewDisplay = {
       if (isPlaceholderText(answerText)) return ['']
 
       // Supports two numbering formats:
-      // 1. Chinese question prefix format "QuestionX：" or "QuestionX:" (new backend format)
+      // 1. Question prefix format "QuestionX:" (new backend format)
       // 2. "1. " or "\n1. " (digit+dot, legacy format compatibility)
       let matches = []
       let match
 
       // Prefer trying the "QuestionN:" format first (English or Chinese)
-      const cnPattern = /(?:^|[\r\n]+)(?:Question|问题)(\d+)[：:]\s*/g
+      const cnPattern = /(?:^|[\r\n]+)Question(\d+)[：:]\s*/g
       while ((match = cnPattern.exec(answerText)) !== null) {
         matches.push({
           num: parseInt(match[1]),
@@ -1366,7 +1366,7 @@ const InterviewDisplay = {
       // If no numbering found or only one found, return the whole text
       if (matches.length <= 1) {
         const cleaned = answerText
-          .replace(/^(?:Question|问题)\d+[：:]\s*/, '')
+          .replace(/^Question\d+[：:]\s*/, '')
           .replace(/^\d+\.\s+/, '')
           .trim()
         return [cleaned || answerText]
@@ -2006,8 +2006,8 @@ const getActionLabel = (action) => {
 }
 
 const getLogLevelClass = (log) => {
-  if (log.includes('ERROR') || log.includes('错误') || log.includes('error')) return 'error'
-  if (log.includes('WARNING') || log.includes('警告') || log.includes('warning')) return 'warning'
+  if (log.includes('ERROR') || log.includes('error')) return 'error'
+  if (log.includes('WARNING') || log.includes('warning')) return 'warning'
   // INFO uses default color, not marked as success
   return ''
 }
@@ -2098,9 +2098,9 @@ const extractFinalContent = (response) => {
   }
   
   // Attempt to find content after the final answer label (English or Chinese)
-  const chineseFinalMatch = response.match(/(?:Final answer|最终答案)[:：]\s*\n*([\s\S]*)$/i)
-  if (chineseFinalMatch) {
-    return chineseFinalMatch[1].trim()
+  const altFinalMatch = response.match(/Final\s*answer[:：]\s*\n*([\s\S]*)$/i)
+  if (altFinalMatch) {
+    return altFinalMatch[1].trim()
   }
   
   // If it starts with ## or # or >, it may be direct markdown content

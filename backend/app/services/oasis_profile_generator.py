@@ -1126,16 +1126,12 @@ Important:
 
         gender_lower = gender.lower().strip()
 
-        # Chinese to English mapping
         gender_map = {
-            "男": "male",
-            "女": "female",
-            "机构": "other",
-            "其他": "other",
-            # Already in English
             "male": "male",
             "female": "female",
             "other": "other",
+            "m": "male",
+            "f": "female",
         }
 
         return gender_map.get(gender_lower, "other")

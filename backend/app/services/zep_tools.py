@@ -314,7 +314,7 @@ class AgentInterview:
                 clean_quote = clean_quote.replace('\u300c', '').replace('\u300d', '')
                 clean_quote = clean_quote.strip()
                 # Remove leading punctuation
-                while clean_quote and clean_quote[0] in '，,；;：:、。！？\n\r\t ':
+                while clean_quote and clean_quote[0] in ',;:.\n\r\t !?':
                     clean_quote = clean_quote[1:]
                 # Filter out content containing question numbers (questions 1–9)
                 skip = False
@@ -572,7 +572,7 @@ class ZepToolsService:
 
         # Extract query keywords (simple tokenization)
         query_lower = query.lower()
-        keywords = [w.strip() for w in query_lower.replace(',', ' ').replace('，', ' ').split() if len(w.strip()) > 1]
+        keywords = [w.strip() for w in query_lower.replace(',', ' ').replace(',', ' ').split() if len(w.strip()) > 1]
 
         def match_score(text: str) -> int:
             """Calculate how well the text matches the query."""
@@ -1210,7 +1210,7 @@ Return a JSON list of sub-questions."""
 
         # Sort by relevance to the query
         query_lower = query.lower()
-        keywords = [w.strip() for w in query_lower.replace(',', ' ').replace('，', ' ').split() if len(w.strip()) > 1]
+        keywords = [w.strip() for w in query_lower.replace(',', ' ').replace(',', ' ').split() if len(w.strip()) > 1]
 
         def relevance_score(fact: str) -> int:
             fact_lower = fact.lower()
@@ -1427,25 +1427,23 @@ Return a JSON list of sub-questions."""
                 clean_text = re.sub(r'#{1,6}\s+', '', combined_responses)
                 clean_text = re.sub(r'\{[^}]*tool_name[^}]*\}', '', clean_text)
                 clean_text = re.sub(r'[*_`|>~\-]{2,}', '', clean_text)
-                clean_text = re.sub(r'(Question|问题)\d+[：:]\s*', '', clean_text)
-                clean_text = re.sub(r'【[^】]+】', '', clean_text)
+                clean_text = re.sub(r'Question\d+[：:]\s*', '', clean_text)
 
                 # Strategy 1 (primary): extract complete meaningful sentences
-                sentences = re.split(r'[.!?。！？]', clean_text)
+                sentences = re.split(r'[.!?]', clean_text)
                 meaningful = [
                     s.strip() for s in sentences
                     if 20 <= len(s.strip()) <= 150
-                    and not re.match(r'^[\s\W，,；;：:、]+', s.strip())
-                    and not s.strip().startswith(('{', 'Question', '问题'))
+                    and not re.match(r'^[\s\W,;:]+', s.strip())
+                    and not s.strip().startswith(('{', 'Question'))
                 ]
                 meaningful.sort(key=len, reverse=True)
-                key_quotes = [s + "。" for s in meaningful[:3]]
+                key_quotes = [s + "." for s in meaningful[:3]]
 
-                # Strategy 2 (supplementary): paired Chinese quotation marks 「」 with long text
+                # Strategy 2 (supplementary): extract quoted text
                 if not key_quotes:
-                    paired = re.findall(r'\u201c([^\u201c\u201d]{15,100})\u201d', clean_text)
-                    paired += re.findall(r'\u300c([^\u300c\u300d]{15,100})\u300d', clean_text)
-                    key_quotes = [q for q in paired if not re.match(r'^[，,；;：:、]', q)][:3]
+                    paired = re.findall(r'"([^"]{15,100})"', clean_text)
+                    key_quotes = paired[:3]
 
                 interview = AgentInterview(
                     agent_name=agent_name,
