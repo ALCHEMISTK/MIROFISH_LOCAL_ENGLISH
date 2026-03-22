@@ -163,6 +163,56 @@ def _detect_embedding_dim_ollama(embed_model: str, ollama_host: str) -> int:
         return 768
 
 
+# Ollama-specific model names that should NOT be sent to cloud APIs.
+_OLLAMA_EMBED_MODELS = {
+    "nomic-embed-text", "mxbai-embed-large", "all-minilm",
+    "snowflake-arctic-embed", "bge-m3", "bge-large",
+}
+
+# Well-known cloud provider base URLs → default embedding model.
+_CLOUD_EMBED_DEFAULTS = {
+    "api.openai.com": "text-embedding-3-small",
+    "open.bigmodel.cn": "embedding-3",
+    "api.deepseek.com": "text-embedding-3-small",
+    "api.moonshot.cn": "text-embedding-3-small",
+    "api.siliconflow.cn": "text-embedding-3-small",
+}
+
+
+def _resolve_embed_model(configured_model: str, base_url: str) -> str:
+    """
+    Pick the right embedding model for the current provider.
+    - If the user explicitly set a cloud-compatible model, use it.
+    - If the model is an Ollama default but we're on a cloud API,
+      auto-select a known default for that provider.
+    """
+    if configured_model.lower() not in _OLLAMA_EMBED_MODELS:
+        return configured_model  # User set a specific model, respect it.
+
+    # We're on a cloud API but the model is Ollama-specific — pick a cloud default.
+    try:
+        host = (urlparse(base_url).hostname or "").lower()
+    except Exception:
+        host = ""
+
+    for domain, default_model in _CLOUD_EMBED_DEFAULTS.items():
+        if domain in host:
+            logger.info(
+                f"Auto-selected cloud embedding model '{default_model}' "
+                f"for provider {host} (was '{configured_model}')"
+            )
+            return default_model
+
+    # Unknown cloud provider — try text-embedding-3-small (widely supported)
+    fallback = "text-embedding-3-small"
+    logger.warning(
+        f"Cloud API detected ({host}) but EMBED_MODEL is set to Ollama model "
+        f"'{configured_model}'. Auto-falling back to '{fallback}'. "
+        f"Set EMBED_MODEL in .env if this is wrong."
+    )
+    return fallback
+
+
 def _detect_embedding_dim_openai(embed_model: str, api_key: str, base_url: str) -> int:
     """Probe an OpenAI-compatible API to find the embedding dimension."""
     try:
@@ -211,7 +261,10 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
             llm_model_func, llm_model_kwargs = build_lightrag_llm_binding()
             use_local_ollama = _is_local_ollama(Config.LLM_BASE_URL)
 
-            embed_model = Config.EMBED_MODEL
+            if use_local_ollama:
+                embed_model = Config.EMBED_MODEL
+            else:
+                embed_model = _resolve_embed_model(Config.EMBED_MODEL, Config.LLM_BASE_URL)
 
             if use_local_ollama:
                 # --- Ollama embeddings (local) ---
