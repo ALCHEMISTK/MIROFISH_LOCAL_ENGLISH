@@ -172,7 +172,7 @@ _OLLAMA_EMBED_MODELS = {
 # Well-known cloud provider base URLs → default embedding model.
 _CLOUD_EMBED_DEFAULTS = {
     "api.openai.com": "text-embedding-3-small",
-    "open.bigmodel.cn": "embedding-3",
+    "open.bigmodel.cn": "embedding-2",
     "api.deepseek.com": "text-embedding-3-small",
     "api.moonshot.cn": "text-embedding-3-small",
     "api.siliconflow.cn": "text-embedding-3-small",
