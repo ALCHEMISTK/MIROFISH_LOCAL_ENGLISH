@@ -65,11 +65,11 @@
           </div>
 
           <div class="form-group">
-            <label>Embedding Model (Ollama)</label>
+            <label>Embedding Model</label>
             <input
               type="text"
-              v-model="form.ollama_embed_model"
-              placeholder="nomic-embed-text"
+              v-model="form.embed_model"
+              placeholder="nomic-embed-text / text-embedding-3-small"
               class="form-input"
             />
           </div>
@@ -141,7 +141,7 @@ const form = ref({
   llm_api_key: 'ollama',
   llm_base_url: 'http://localhost:11434/v1',
   llm_model_name: 'qwen2.5:7b',
-  ollama_embed_model: 'nomic-embed-text',
+  embed_model: 'nomic-embed-text',
   llm_boost_api_key: '',
   llm_boost_base_url: '',
   llm_boost_model_name: '',
@@ -166,14 +166,14 @@ const applyOllamaPreset = () => {
   form.value.llm_api_key = 'ollama'
   form.value.llm_base_url = 'http://localhost:11434/v1'
   form.value.llm_model_name = 'qwen2.5:7b'
-  form.value.ollama_embed_model = 'nomic-embed-text'
+  form.value.embed_model = 'nomic-embed-text'
 }
 
 const applyOpenAIPreset = () => {
   form.value.llm_api_key = ''
   form.value.llm_base_url = 'https://api.openai.com/v1'
   form.value.llm_model_name = 'gpt-4o-mini'
-  form.value.ollama_embed_model = ''
+  form.value.embed_model = 'text-embedding-3-small'
 }
 
 // Load existing config on mount
@@ -182,7 +182,7 @@ const loadExisting = async () => {
     const res = await getSetupStatus()
     if (res.llm_base_url) form.value.llm_base_url = res.llm_base_url
     if (res.llm_model_name) form.value.llm_model_name = res.llm_model_name
-    if (res.ollama_embed_model) form.value.ollama_embed_model = res.ollama_embed_model
+    if (res.embed_model) form.value.embed_model = res.embed_model
     if (res.llm_api_key) form.value.llm_api_key = res.llm_api_key
   } catch (e) {
     // Backend may not be ready yet

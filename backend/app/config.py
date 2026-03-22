@@ -34,9 +34,13 @@ class Config:
     # 0 means wait indefinitely until quota becomes available again.
     LLM_QUOTA_MAX_WAIT_SECONDS = float(os.environ.get('LLM_QUOTA_MAX_WAIT_SECONDS', '0'))
 
-    # Ollama + LightRAG configuration (local GraphRAG, replaces Zep Cloud)
+    # Embedding & LightRAG configuration
+    # EMBED_MODEL is provider-agnostic: set to an Ollama model (e.g. nomic-embed-text)
+    # for local, or an OpenAI model (e.g. text-embedding-3-small) for cloud.
+    # The provider is auto-detected from LLM_BASE_URL.
     OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')
-    OLLAMA_EMBED_MODEL = os.environ.get('OLLAMA_EMBED_MODEL', 'nomic-embed-text')
+    EMBED_MODEL = os.environ.get('EMBED_MODEL',
+                                 os.environ.get('OLLAMA_EMBED_MODEL', 'nomic-embed-text'))
     LIGHTRAG_DATA_DIR = os.path.join(os.path.dirname(__file__), '../data/lightrag_graphs')
 
     # File upload
@@ -86,8 +90,10 @@ class Config:
             cls.LLM_BASE_URL = settings["llm_base_url"]
         if not os.environ.get('LLM_MODEL_NAME') and settings.get("llm_model_name"):
             cls.LLM_MODEL_NAME = settings["llm_model_name"]
-        if not os.environ.get('OLLAMA_EMBED_MODEL') and settings.get("ollama_embed_model"):
-            cls.OLLAMA_EMBED_MODEL = settings["ollama_embed_model"]
+        if not os.environ.get('EMBED_MODEL') and not os.environ.get('OLLAMA_EMBED_MODEL'):
+            embed = settings.get("embed_model") or settings.get("ollama_embed_model")
+            if embed:
+                cls.EMBED_MODEL = embed
 
     @classmethod
     def validate(cls):

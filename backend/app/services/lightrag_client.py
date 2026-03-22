@@ -138,7 +138,7 @@ def run_async(coro, timeout: Optional[float] = None):
     return _loop_thread.run(coro, timeout=timeout)
 
 
-def _detect_embedding_dim(embed_model: str, ollama_host: str) -> int:
+def _detect_embedding_dim_ollama(embed_model: str, ollama_host: str) -> int:
     """Probe Ollama to find the actual embedding dimension for the configured model."""
     try:
         import ollama as _ollama
@@ -148,6 +148,18 @@ def _detect_embedding_dim(embed_model: str, ollama_host: str) -> int:
     except Exception as e:
         logger.warning(f"Could not detect embedding dim for {embed_model}: {e}. Defaulting to 768.")
         return 768
+
+
+def _detect_embedding_dim_openai(embed_model: str, api_key: str, base_url: str) -> int:
+    """Probe an OpenAI-compatible API to find the embedding dimension."""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        resp = client.embeddings.create(model=embed_model, input="dim probe")
+        return len(resp.data[0].embedding)
+    except Exception as e:
+        logger.warning(f"Could not detect embedding dim for {embed_model}: {e}. Defaulting to 1536.")
+        return 1536
 
 
 def get_working_dir(graph_id: str) -> str:
@@ -181,34 +193,51 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
 
         try:
             from lightrag import LightRAG
-
-            ollama_host = Config.OLLAMA_BASE_URL
-            embed_model = Config.OLLAMA_EMBED_MODEL
-            llm_model_func, llm_model_kwargs = build_lightrag_llm_binding()
-
-            # Detect actual embedding dimension from the configured model
-            # so we can configure LightRAG's vector DB correctly.
-            embed_dim = _detect_embedding_dim(embed_model, ollama_host)
-            logger.info(f"Embedding model: {embed_model}, dim={embed_dim}")
-
-            # Build a properly decorated embedding function.
-            # LightRAG's built-in ollama_embed is hardcoded to 1024 (bge-m3),
-            # so we use wrap_embedding_func_with_attrs with the actual dim.
             from lightrag.utils import wrap_embedding_func_with_attrs
-            import ollama as _ollama
 
-            @wrap_embedding_func_with_attrs(
-                embedding_dim=embed_dim,
-                max_token_size=8192,
-            )
-            async def _embed(texts, **_kwargs):
-                import numpy as np
-                client = _ollama.AsyncClient(host=ollama_host)
-                embeddings = []
-                for text in texts:
-                    resp = await client.embeddings(model=embed_model, prompt=text)
-                    embeddings.append(resp.embedding)
-                return np.array(embeddings, dtype=np.float32)
+            llm_model_func, llm_model_kwargs = build_lightrag_llm_binding()
+            use_local_ollama = _is_local_ollama(Config.LLM_BASE_URL)
+
+            embed_model = Config.EMBED_MODEL
+
+            if use_local_ollama:
+                # --- Ollama embeddings (local) ---
+                import ollama as _ollama
+                ollama_host = Config.OLLAMA_BASE_URL
+                embed_dim = _detect_embedding_dim_ollama(embed_model, ollama_host)
+                logger.info(f"Embedding: Ollama local | model={embed_model}, dim={embed_dim}")
+
+                @wrap_embedding_func_with_attrs(
+                    embedding_dim=embed_dim,
+                    max_token_size=8192,
+                )
+                async def _embed(texts, **_kwargs):
+                    import numpy as np
+                    client = _ollama.AsyncClient(host=ollama_host)
+                    embeddings = []
+                    for text in texts:
+                        resp = await client.embeddings(model=embed_model, prompt=text)
+                        embeddings.append(resp.embedding)
+                    return np.array(embeddings, dtype=np.float32)
+            else:
+                # --- OpenAI-compatible embeddings (cloud) ---
+                api_key = Config.LLM_API_KEY
+                base_url = Config.LLM_BASE_URL
+                embed_dim = _detect_embedding_dim_openai(embed_model, api_key, base_url)
+                logger.info(f"Embedding: OpenAI-compatible API | model={embed_model}, dim={embed_dim}")
+
+                @wrap_embedding_func_with_attrs(
+                    embedding_dim=embed_dim,
+                    max_token_size=8192,
+                )
+                async def _embed(texts, **_kwargs):
+                    import numpy as np
+                    from openai import AsyncOpenAI
+                    client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+                    resp = await client.embeddings.create(model=embed_model, input=texts)
+                    return np.array(
+                        [d.embedding for d in resp.data], dtype=np.float32
+                    )
 
             rag = LightRAG(
                 working_dir=working_dir,
