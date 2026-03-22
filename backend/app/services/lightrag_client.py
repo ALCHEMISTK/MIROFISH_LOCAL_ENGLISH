@@ -169,46 +169,73 @@ _OLLAMA_EMBED_MODELS = {
     "snowflake-arctic-embed", "bge-m3", "bge-large",
 }
 
-# Well-known cloud provider base URLs → default embedding model.
-_CLOUD_EMBED_DEFAULTS = {
-    "api.openai.com": "text-embedding-3-small",
-    "open.bigmodel.cn": "embedding-2",
-    "api.deepseek.com": "text-embedding-3-small",
-    "api.moonshot.cn": "text-embedding-3-small",
-    "api.siliconflow.cn": "text-embedding-3-small",
+# Well-known cloud provider base URLs → candidate embedding models (tried in order).
+_CLOUD_EMBED_CANDIDATES = {
+    "api.openai.com": ["text-embedding-3-small", "text-embedding-ada-002"],
+    "open.bigmodel.cn": ["embedding-3", "embedding-2", "text_embedding"],
+    "api.deepseek.com": ["text-embedding-3-small"],
+    "api.moonshot.cn": ["text-embedding-3-small"],
+    "api.siliconflow.cn": ["text-embedding-3-small"],
 }
 
+# Generic fallbacks for unknown providers
+_GENERIC_EMBED_CANDIDATES = [
+    "text-embedding-3-small", "text-embedding-ada-002",
+    "embedding-3", "embedding-2",
+]
 
-def _resolve_embed_model(configured_model: str, base_url: str) -> str:
+
+def _probe_embed_model(model: str, api_key: str, base_url: str) -> bool:
+    """Test if an embedding model works by making a minimal API call."""
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        client.embeddings.create(model=model, input="test")
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_embed_model(configured_model: str, base_url: str, api_key: str = "") -> str:
     """
     Pick the right embedding model for the current provider.
     - If the user explicitly set a cloud-compatible model, use it.
     - If the model is an Ollama default but we're on a cloud API,
-      auto-select a known default for that provider.
+      probe candidate models until one works.
     """
     if configured_model.lower() not in _OLLAMA_EMBED_MODELS:
         return configured_model  # User set a specific model, respect it.
 
-    # We're on a cloud API but the model is Ollama-specific — pick a cloud default.
+    # We're on a cloud API but the model is Ollama-specific — find a working one.
     try:
         host = (urlparse(base_url).hostname or "").lower()
     except Exception:
         host = ""
 
-    for domain, default_model in _CLOUD_EMBED_DEFAULTS.items():
+    # Build candidate list: provider-specific first, then generic
+    candidates = []
+    for domain, models in _CLOUD_EMBED_CANDIDATES.items():
         if domain in host:
-            logger.info(
-                f"Auto-selected cloud embedding model '{default_model}' "
-                f"for provider {host} (was '{configured_model}')"
-            )
-            return default_model
+            candidates.extend(models)
+            break
+    for m in _GENERIC_EMBED_CANDIDATES:
+        if m not in candidates:
+            candidates.append(m)
 
-    # Unknown cloud provider — try text-embedding-3-small (widely supported)
-    fallback = "text-embedding-3-small"
-    logger.warning(
-        f"Cloud API detected ({host}) but EMBED_MODEL is set to Ollama model "
-        f"'{configured_model}'. Auto-falling back to '{fallback}'. "
-        f"Set EMBED_MODEL in .env if this is wrong."
+    # Probe each candidate
+    for model in candidates:
+        logger.info(f"Probing embedding model '{model}' on {host}...")
+        if _probe_embed_model(model, api_key, base_url):
+            logger.info(f"Embedding model '{model}' works on {host}")
+            return model
+        logger.warning(f"Embedding model '{model}' not available on {host}")
+
+    # Nothing worked — use first candidate and let it fail with a clear error
+    fallback = candidates[0] if candidates else "text-embedding-3-small"
+    logger.error(
+        f"No working embedding model found on {host}. "
+        f"Tried: {candidates}. "
+        f"Set EMBED_MODEL in .env to the correct model for your provider."
     )
     return fallback
 
@@ -264,7 +291,7 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
             if use_local_ollama:
                 embed_model = Config.EMBED_MODEL
             else:
-                embed_model = _resolve_embed_model(Config.EMBED_MODEL, Config.LLM_BASE_URL)
+                embed_model = _resolve_embed_model(Config.EMBED_MODEL, Config.LLM_BASE_URL, Config.LLM_API_KEY)
 
             if use_local_ollama:
                 # --- Ollama embeddings (local) ---
