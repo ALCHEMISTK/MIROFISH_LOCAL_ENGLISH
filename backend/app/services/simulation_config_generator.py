@@ -441,16 +441,22 @@ class SimulationConfigGenerator:
 
         for attempt in range(max_attempts):
             try:
-                response = self.client.chat.completions.create(
+                kwargs = dict(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    response_format={"type": "json_object"},
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
-                    max_tokens=4096,
+                    max_tokens=2048,
                 )
+                # response_format not supported by all providers; try with, fall back without
+                try:
+                    response = self.client.chat.completions.create(
+                        **kwargs, response_format={"type": "json_object"}
+                    )
+                except Exception:
+                    response = self.client.chat.completions.create(**kwargs)
 
                 content = response.choices[0].message.content
                 finish_reason = response.choices[0].finish_reason
