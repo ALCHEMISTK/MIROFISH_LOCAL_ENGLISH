@@ -1348,8 +1348,8 @@ class ReportAgent:
         if previous_sections:
             previous_parts = []
             for i, sec in enumerate(previous_sections):
-                # Only keep first 300 chars as summary to save tokens
-                summary = sec[:300].rsplit(' ', 1)[0] + "..." if len(sec) > 300 else sec
+                # Keep first 800 chars as summary — enough for coherence, avoids quadratic growth
+                summary = sec[:800].rsplit(' ', 1)[0] + "..." if len(sec) > 800 else sec
                 previous_parts.append(f"[Section {i+1} summary]: {summary}")
             previous_content = "\n".join(previous_parts)
         else:
@@ -1992,7 +1992,7 @@ class ReportAgent:
             logger.warning(f"Failed to retrieve report content: {e}")
 
         # Cap report content to save tokens in chat turns
-        capped_report = report_content[:3000] + "\n...(truncated)" if report_content and len(report_content) > 3000 else report_content
+        capped_report = report_content[:6000] + "\n...(truncated)" if report_content and len(report_content) > 6000 else report_content
         system_prompt = CHAT_SYSTEM_PROMPT_TEMPLATE.format(
             simulation_requirement=self.simulation_requirement,
             report_content=capped_report if capped_report else "(No report available)",
