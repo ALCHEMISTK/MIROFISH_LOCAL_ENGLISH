@@ -6,6 +6,7 @@ Exports identical class/dataclass names so callers need only swap the import.
 """
 
 import os
+import networkx as nx
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
