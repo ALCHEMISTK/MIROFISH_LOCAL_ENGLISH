@@ -26,11 +26,11 @@ _rag_lock = threading.Lock()
 
 class AdaptiveRateLimiter:
     """
-    Adaptive rate limiter that finds the provider's optimal throughput.
-    Starts at max concurrency and steps down on errors, steps up on success.
+    AIMD-style adaptive rate limiter (like TCP congestion control).
+    Starts at max concurrency and dynamically finds the provider's limit.
 
-    - On success streak: +1 concurrency
-    - On 429/rate-limit: -1 concurrency + cooldown
+    - On success streak: additive increase (+1 concurrency)
+    - On 429/rate-limit: multiplicative decrease (halve concurrency + cooldown)
     """
 
     def __init__(self, max_concurrency: int = 16, min_concurrency: int = 1):
@@ -72,13 +72,13 @@ class AdaptiveRateLimiter:
             self._last_decrease_time = now
 
             old = self._current
-            self._current = max(self._min, self._current - 1)
-            # Drain one permit from the semaphore
-            if old > self._current:
+            self._current = max(self._min, self._current // 2)
+            # Drain excess permits by acquiring without releasing
+            for _ in range(old - self._current):
                 try:
                     self._semaphore.acquire_nowait()
                 except Exception:
-                    pass
+                    break
 
             # Increase cooldown when we're already at minimum
             if self._current == self._min:
