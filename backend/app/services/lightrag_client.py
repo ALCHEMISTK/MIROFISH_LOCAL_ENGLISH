@@ -464,7 +464,7 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
             if not use_local_ollama:
                 concurrency_kwargs = {
                     "llm_model_max_async": 32,
-                    "max_parallel_insert": 4,
+                    "max_parallel_insert": 8,
                     "embedding_func_max_async": 32,
                 }
                 logger.info("Cloud API: starting with adaptive rate limiting (max concurrency=32)")
