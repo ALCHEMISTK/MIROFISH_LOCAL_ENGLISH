@@ -196,15 +196,29 @@ def _probe_embed_model(model: str, api_key: str, base_url: str) -> bool:
         return False
 
 
-def _resolve_embed_model(configured_model: str, base_url: str, api_key: str = "") -> str:
+def _probe_ollama_available(ollama_host: str, model: str = "nomic-embed-text") -> bool:
+    """Check if a local Ollama instance is reachable and has the embedding model."""
+    try:
+        import ollama as _ollama
+        client = _ollama.Client(host=ollama_host)
+        client.embeddings(model=model, prompt="test")
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_embed_model(configured_model: str, base_url: str, api_key: str = "") -> tuple:
     """
-    Pick the right embedding model for the current provider.
-    - If the user explicitly set a cloud-compatible model, use it.
-    - If the model is an Ollama default but we're on a cloud API,
-      probe candidate models until one works.
+    Pick the right embedding model and provider for the current setup.
+    Returns (model_name, provider) where provider is "cloud" or "ollama".
+
+    Strategy:
+    1. If user explicitly set a cloud-compatible model, use it with cloud.
+    2. If model is Ollama-specific but LLM is cloud, probe cloud candidates.
+    3. If no cloud embedding works, fall back to local Ollama for embeddings only.
     """
     if configured_model.lower() not in _OLLAMA_EMBED_MODELS:
-        return configured_model  # User set a specific model, respect it.
+        return configured_model, "cloud"  # User set a specific model, respect it.
 
     # We're on a cloud API but the model is Ollama-specific — find a working one.
     try:
@@ -222,22 +236,33 @@ def _resolve_embed_model(configured_model: str, base_url: str, api_key: str = ""
         if m not in candidates:
             candidates.append(m)
 
-    # Probe each candidate
+    # Probe each cloud candidate
     for model in candidates:
         logger.info(f"Probing embedding model '{model}' on {host}...")
         if _probe_embed_model(model, api_key, base_url):
             logger.info(f"Embedding model '{model}' works on {host}")
-            return model
+            return model, "cloud"
         logger.warning(f"Embedding model '{model}' not available on {host}")
 
-    # Nothing worked — use first candidate and let it fail with a clear error
-    fallback = candidates[0] if candidates else "text-embedding-3-small"
-    logger.error(
-        f"No working embedding model found on {host}. "
-        f"Tried: {candidates}. "
-        f"Set EMBED_MODEL in .env to the correct model for your provider."
+    # No cloud embedding available — fall back to local Ollama
+    ollama_host = Config.OLLAMA_BASE_URL
+    ollama_model = "nomic-embed-text"
+    logger.warning(
+        f"No cloud embedding model found on {host} (tried: {candidates}). "
+        f"Falling back to local Ollama at {ollama_host} for embeddings..."
     )
-    return fallback
+    if _probe_ollama_available(ollama_host, ollama_model):
+        logger.info(f"Ollama fallback OK: using '{ollama_model}' at {ollama_host} for embeddings")
+        return ollama_model, "ollama"
+
+    # Nothing works at all
+    logger.error(
+        f"No embedding provider available. Cloud models failed on {host}, "
+        f"and Ollama is not running at {ollama_host}. "
+        f"Either set EMBED_MODEL in .env to a valid cloud model, "
+        f"or start Ollama with: ollama pull {ollama_model}"
+    )
+    return candidates[0] if candidates else "text-embedding-3-small", "cloud"
 
 
 def _detect_embedding_dim_openai(embed_model: str, api_key: str, base_url: str) -> int:
@@ -290,10 +315,13 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
 
             if use_local_ollama:
                 embed_model = Config.EMBED_MODEL
+                embed_provider = "ollama"
             else:
-                embed_model = _resolve_embed_model(Config.EMBED_MODEL, Config.LLM_BASE_URL, Config.LLM_API_KEY)
+                embed_model, embed_provider = _resolve_embed_model(
+                    Config.EMBED_MODEL, Config.LLM_BASE_URL, Config.LLM_API_KEY
+                )
 
-            if use_local_ollama:
+            if embed_provider == "ollama":
                 # --- Ollama embeddings (local) ---
                 import ollama as _ollama
                 ollama_host = Config.OLLAMA_BASE_URL
