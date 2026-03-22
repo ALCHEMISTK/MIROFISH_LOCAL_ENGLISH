@@ -119,7 +119,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 2048,
         response_format: Optional[Dict] = None
     ) -> str:
         """
@@ -198,7 +198,7 @@ class LLMClient:
         self,
         messages: List[Dict[str, str]],
         temperature: float = 0.3,
-        max_tokens: int = 4096
+        max_tokens: int = 2048
     ) -> Dict[str, Any]:
         """
         Send a chat request and return JSON

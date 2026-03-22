@@ -470,7 +470,7 @@ Return ONLY valid JSON, no other text."""
             response = llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
-                max_tokens=4096,
+                max_tokens=2048,
                 response_format={"type": "json_object"},
             )
             result = llm._parse_json_response(response)

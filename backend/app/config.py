@@ -49,9 +49,9 @@ class Config:
     UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '../uploads')
     ALLOWED_EXTENSIONS = {'pdf', 'md', 'txt', 'markdown'}
 
-    # Text processing
-    DEFAULT_CHUNK_SIZE = 500
-    DEFAULT_CHUNK_OVERLAP = 50
+    # Text processing (larger chunks = fewer LLM calls + better extraction context)
+    DEFAULT_CHUNK_SIZE = 1000
+    DEFAULT_CHUNK_OVERLAP = 100
 
     # OASIS simulation
     OASIS_DEFAULT_MAX_ROUNDS = int(os.environ.get('OASIS_DEFAULT_MAX_ROUNDS', '10'))

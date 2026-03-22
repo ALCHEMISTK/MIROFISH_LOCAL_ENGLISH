@@ -448,8 +448,8 @@ class SimulationConfigGenerator:
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1)  # Lower temperature on each retry
-                    # No max_tokens set, let LLM respond freely
+                    temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
+                    max_tokens=2048,
                 )
 
                 content = response.choices[0].message.content

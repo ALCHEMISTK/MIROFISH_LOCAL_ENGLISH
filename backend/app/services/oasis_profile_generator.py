@@ -524,8 +524,8 @@ class OasisProfileGenerator:
                         {"role": "user", "content": prompt}
                     ],
                     response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1)  # Lower temperature on each retry
-                    # No max_tokens set, let LLM respond freely
+                    temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
+                    max_tokens=2048,
                 )
 
                 content = response.choices[0].message.content
@@ -684,9 +684,7 @@ class OasisProfileGenerator:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""LANGUAGE: ALL OUTPUT MUST BE IN ENGLISH ONLY. No Chinese or other languages.
-
-Generate a detailed social media user persona for the entity below, maximally reflecting real-world circumstances.
+        return f"""Generate a detailed social media user persona for the entity below, maximally reflecting real-world circumstances.
 
 Entity name: {entity_name}
 Entity type: {entity_type}
@@ -715,7 +713,6 @@ Please generate JSON with the following fields:
 8. interested_topics: Array of interest topics in English
 
 Important:
-- WRITE EVERYTHING IN ENGLISH. If the input is in Chinese, translate it to English in your output.
 - All field values must be strings or numbers; do not use newlines
 - persona must be a coherent text description
 - gender must be "male" or "female"
@@ -735,9 +732,7 @@ Important:
         attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
         context_str = context[:3000] if context else "No additional context"
 
-        return f"""LANGUAGE: ALL OUTPUT MUST BE IN ENGLISH ONLY. No Chinese or other languages.
-
-Generate a detailed social media account profile for the institution/group entity below, maximally reflecting real-world circumstances.
+        return f"""Generate a detailed social media account profile for the institution/group entity below, maximally reflecting real-world circumstances.
 
 Entity name: {entity_name}
 Entity type: {entity_type}
@@ -766,7 +761,6 @@ Please generate JSON with the following fields:
 8. interested_topics: Array of focus areas in English
 
 Important:
-- WRITE EVERYTHING IN ENGLISH. If the input is in Chinese, translate it to English in your output.
 - All field values must be strings or numbers; null values are not allowed
 - persona must be a coherent text description; do not use newlines
 - gender must be "other" for institutional accounts
