@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
-from .lightrag_client import get_rag, get_working_dir, run_async
+from .lightrag_client import get_working_dir
 
 logger = get_logger('mirofish.lightrag_tools')
 
@@ -105,11 +105,14 @@ class InsightForgeResult:
     total_facts: int
     total_nodes: int
     total_edges: int
+    simulation_requirement: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "query": self.query,
+            "simulation_requirement": self.simulation_requirement,
             "sub_questions": self.sub_questions,
+            "sub_queries": self.sub_questions,
             "facts": self.facts,
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
@@ -122,7 +125,7 @@ class InsightForgeResult:
         """Produce structured text consumed by the frontend's parseInsightForge parser."""
         parts = [
             f"Analysis question: {self.query}",
-            f"Prediction scenario: (simulation context)",
+            f"Prediction scenario: {self.simulation_requirement or '(simulation context)'}",
             f"Related prediction facts: {self.total_facts}",
             f"Entities involved: {self.total_nodes}",
             f"Relation chains: {self.total_edges}",
@@ -253,25 +256,179 @@ class AgentInterview:
 class ZepToolsService:
     """
     Drop-in replacement for ZepToolsService.
-    Maps Zep search patterns to LightRAG query modes.
+    Reads the knowledge graph directly from GraphML and uses the LLM
+    (via LLMClient) to synthesise answers. Works for both local Ollama
+    and any cloud API configured in .env - no LightRAG vector engine needed.
     Constructor accepts optional api_key for signature compatibility (ignored).
     """
 
-    def __init__(self, api_key: Optional[str] = None):
-        pass  # No API key needed
+    _MODE_NODE_LIMIT = {"global": 30, "hybrid": 20, "local": 15, "naive": 10}
+    _MODE_EDGE_LIMIT = {"global": 30, "hybrid": 20, "local": 15, "naive": 10}
+
+    def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
+        self._llm_client = llm_client
+
+    @property
+    def llm(self) -> LLMClient:
+        if self._llm_client is None:
+            self._llm_client = LLMClient()
+        return self._llm_client
+
+    def _llm_call_with_retry(self, prompt: str, max_retries: int = 3) -> str:
+        """
+        Call LLM with exponential backoff on 429 rate-limit errors.
+        Uses LLMClient which routes to local Ollama or cloud API based on .env.
+        """
+        import time
+
+        for attempt in range(max_retries):
+            try:
+                return self.llm.chat([{"role": "user", "content": prompt}])
+            except Exception as e:
+                err = str(e)
+                if "429" in err or "rate" in err.lower():
+                    wait = 15.0 * (attempt + 1)
+                    logger.warning(
+                        f"LLM rate limited in graph query. "
+                        f"Waiting {wait}s (retry {attempt + 1}/{max_retries})..."
+                    )
+                    time.sleep(wait)
+                else:
+                    logger.error(f"LLM call failed: {e}")
+                    raise
+
+        logger.error("Max retries exceeded for LLM graph query.")
+        return ""
 
     def _query_rag(self, graph_id: str, query: str, mode: str = "hybrid") -> str:
-        """Run a LightRAG query and return the text result."""
-        rag = get_rag(graph_id, create_if_missing=False)
-        if not rag:
-            logger.warning(f"No LightRAG instance for graph_id={graph_id}")
+        """
+        Search the knowledge graph and synthesise an answer using the LLM.
+
+        Replaces LightRAG's rag.aquery():
+          - Reads GraphML directly via NetworkX (already used elsewhere in the app)
+          - No vector DB, no Ollama embeddings, no timeouts
+          - LLM synthesis via LLMClient (auto-detects local Ollama vs cloud API)
+          - Rate-limit safe: retries with backoff on 429
+
+        mode semantics mirror LightRAG naming:
+          local  -> top matching entities + their direct edges
+          hybrid -> broader match across nodes AND relationships
+          global -> full graph overview
+          naive  -> quick keyword match, minimal context
+        """
+        import networkx as nx
+
+        working_dir = get_working_dir(graph_id)
+        graphml_path = os.path.join(working_dir, "graph_chunk_entity_relation.graphml")
+
+        if not os.path.exists(graphml_path):
+            logger.warning(f"GraphML not found for graph_id={graph_id}: {graphml_path}")
             return ""
+
         try:
-            from lightrag import QueryParam
-            result = run_async(rag.aquery(query, param=QueryParam(mode=mode)))
-            return result or ""
+            G = nx.read_graphml(graphml_path)
         except Exception as e:
-            logger.error(f"LightRAG query failed (mode={mode}): {e}")
+            logger.warning(f"Could not read GraphML for {graph_id}: {e}")
+            return ""
+
+        if G.number_of_nodes() == 0:
+            return ""
+
+        node_limit = self._MODE_NODE_LIMIT.get(mode, 15)
+        edge_limit = self._MODE_EDGE_LIMIT.get(mode, 15)
+
+        node_name_map = {
+            nid: data.get("name", data.get("entity_name", nid))
+            for nid, data in G.nodes(data=True)
+        }
+
+        query_words = {
+            word.lower()
+            for word in query.replace(",", " ").replace(".", " ").split()
+            if len(word) > 2
+        }
+
+        if mode == "global":
+            selected_nodes = list(G.nodes(data=True))[:node_limit]
+            selected_edges = list(G.edges(data=True))[:edge_limit]
+        else:
+            scored_nodes = []
+            for nid, data in G.nodes(data=True):
+                text = " ".join([
+                    data.get("name", ""),
+                    data.get("entity_name", ""),
+                    data.get("description", ""),
+                    data.get("type", ""),
+                    data.get("entity_type", ""),
+                ]).lower()
+                score = sum(1 for word in query_words if word in text)
+                scored_nodes.append((score, nid, data))
+            scored_nodes.sort(key=lambda item: item[0], reverse=True)
+            selected_nodes = (
+                [(nid, data) for _, nid, data in scored_nodes[:node_limit]]
+                or list(G.nodes(data=True))[:node_limit]
+            )
+
+            scored_edges = []
+            for src, tgt, data in G.edges(data=True):
+                text = " ".join([
+                    data.get("description", ""),
+                    data.get("type", ""),
+                    data.get("keywords", ""),
+                    node_name_map.get(src, ""),
+                    node_name_map.get(tgt, ""),
+                ]).lower()
+                score = sum(1 for word in query_words if word in text)
+                scored_edges.append((score, src, tgt, data))
+            scored_edges.sort(key=lambda item: item[0], reverse=True)
+            selected_edges = (
+                [(src, tgt, data) for _, src, tgt, data in scored_edges[:edge_limit]]
+                or list(G.edges(data=True))[:edge_limit]
+            )
+
+        node_lines = []
+        for nid, data in selected_nodes:
+            name = data.get("name", data.get("entity_name", nid))
+            entity_type = data.get("type", data.get("entity_type", ""))
+            desc = data.get("description", "")
+            if entity_type:
+                node_lines.append(f"- {name} ({entity_type}): {desc}")
+            else:
+                node_lines.append(f"- {name}: {desc}")
+
+        edge_lines = []
+        for src, tgt, data in selected_edges:
+            rel = data.get("type", data.get("keywords", "RELATED_TO"))
+            desc = data.get("description", "")
+            src_name = node_name_map.get(src, src)
+            tgt_name = node_name_map.get(tgt, tgt)
+            edge_lines.append(f"- {src_name} --[{rel}]--> {tgt_name}: {desc}")
+
+        context_parts = []
+        if node_lines:
+            context_parts.append("Entities:\n" + "\n".join(node_lines))
+        if edge_lines:
+            context_parts.append("Relationships:\n" + "\n".join(edge_lines))
+        context = "\n\n".join(context_parts)
+
+        if not context:
+            return ""
+
+        synthesis_prompt = (
+            "Based on the following knowledge graph data, answer this question concisely:\n"
+            f"Question: {query}\n\n"
+            f"Knowledge graph context:\n{context}\n\n"
+            "Provide a concise factual answer based only on the information above. "
+            "If the information is insufficient, briefly summarise what is available."
+        )
+
+        try:
+            result = self._llm_call_with_retry(synthesis_prompt)
+            logger.info(f"_query_rag ({mode}): {query[:50]}... -> {len(result)} chars")
+            return result or context
+        except Exception as e:
+            logger.warning(f"_query_rag LLM synthesis failed, returning raw context: {e}")
+            return context
             return ""
 
     def _parse_facts(self, text: str, limit: int = 20) -> List[str]:
@@ -305,22 +462,35 @@ class ZepToolsService:
         max_nodes: int = 10,
         max_edges: int = 10,
         generate_sub_questions: bool = True,
+        simulation_requirement: str = "",
+        report_context: str = "",
+        max_sub_queries: int = 5,
     ) -> InsightForgeResult:
         """Deep hybrid search (maps to LightRAG hybrid mode)."""
+        logger.info(f"InsightForge deep insight retrieval: {query[:80]}...")
         raw = self._query_rag(graph_id, query, mode="hybrid")
         facts = self._parse_facts(raw, limit=max_facts)
 
         # Generate sub-questions via LLM if requested
         sub_questions: List[str] = []
+        bounded_sub_queries = min(max_sub_queries, 2)
         if generate_sub_questions and query:
             try:
-                llm = LLMClient()
-                resp = llm.chat([
-                    {"role": "user", "content":
-                     f"Generate 3 specific sub-questions to deeply investigate this topic: {query}\n"
-                     "Output only the questions, one per line."}
-                ])
-                sub_questions = [l.strip() for l in resp.split('\n') if l.strip()][:3]
+                context_lines = []
+                if simulation_requirement:
+                    context_lines.append(f"Simulation background: {simulation_requirement}")
+                if report_context:
+                    context_lines.append(f"Report context: {report_context[:800]}")
+                context_block = "\n".join(context_lines)
+                prompt = (
+                    f"{context_block}\n\n" if context_block else ""
+                ) + (
+                    f"Generate {bounded_sub_queries} specific sub-questions to deeply investigate this topic: {query}\n"
+                    "Output only the questions, one per line."
+                )
+                resp = self._llm_call_with_retry(prompt)
+                sub_questions = [l.strip() for l in resp.split('\n') if l.strip()][:bounded_sub_queries]
+                logger.info(f"InsightForge generated {len(sub_questions)} sub-questions")
                 # Run additional queries for each sub-question and merge results
                 for sq in sub_questions:
                     sq_raw = self._query_rag(graph_id, sq, mode="local")
@@ -331,8 +501,14 @@ class ZepToolsService:
             except Exception as e:
                 logger.warning(f"Sub-question generation failed: {e}")
 
+        logger.info(
+            f"InsightForge complete: query={query[:50]}..., facts={len(facts)}, "
+            f"sub_questions={len(sub_questions)}"
+        )
+
         return InsightForgeResult(
             query=query,
+            simulation_requirement=simulation_requirement,
             sub_questions=sub_questions,
             facts=facts[:max_facts],
             nodes=[],

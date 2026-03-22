@@ -20,6 +20,27 @@ from .text_processor import TextProcessor
 logger = get_logger('mirofish.graph_builder')
 
 
+def format_graph_build_error(exc: Exception) -> str:
+    """Convert low-level provider errors into actionable graph-build messages."""
+    message = str(exc).strip()
+    lowered = message.lower()
+
+    if any(marker in lowered for marker in (
+        "status code: 429",
+        "session usage limit",
+        "too many requests",
+        "rate limit",
+    )):
+        return (
+            "Graph building failed because the configured Ollama/LLM backend rejected extraction "
+            "requests with a 429 quota/rate-limit error. The current backend appears to be a hosted "
+            "Ollama account without remaining session quota. Point `OLLAMA_BASE_URL` to a local "
+            "Ollama server or switch to a backend/account with available quota, then rebuild the graph."
+        )
+
+    return message
+
+
 @dataclass
 class GraphInfo:
     """Graph metadata."""
@@ -194,8 +215,11 @@ class GraphBuilderService:
                 run_async(rag.ainsert(chunk))
                 chunk_ids.append(chunk_id)
             except Exception as e:
-                logger.error(f"Failed to insert chunk {i} into graph {graph_id}: {e}")
-                raise
+                friendly_error = format_graph_build_error(e)
+                logger.error(
+                    f"Failed to insert chunk {i} into graph {graph_id}: {friendly_error}"
+                )
+                raise RuntimeError(friendly_error) from e
 
             if progress_callback:
                 progress = (i + 1) / total_chunks

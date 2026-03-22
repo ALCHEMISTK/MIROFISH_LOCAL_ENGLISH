@@ -356,6 +356,8 @@ class ReportConsoleLogger:
         loggers_to_attach = [
             'mirofish.report_agent',
             'mirofish.zep_tools',
+            'mirofish.lightrag_tools',
+            'mirofish.llm_client',
         ]
 
         for logger_name in loggers_to_attach:
@@ -372,6 +374,8 @@ class ReportConsoleLogger:
             loggers_to_detach = [
                 'mirofish.report_agent',
                 'mirofish.zep_tools',
+                'mirofish.lightrag_tools',
+                'mirofish.llm_client',
             ]
 
             for logger_name in loggers_to_detach:
@@ -724,11 +728,9 @@ This section analyzed...
 Each reply can only do one of the following two things (not both simultaneously):
 
 Option A - Call a tool:
-Output your thinking, then call one tool using the following format:
-<tool_call>
+Output only one JSON object in the following format:
 {{"name": "tool_name", "parameters": {{"param_name": "param_value"}}}}
-</tool_call>
-The system will execute the tool and return the result to you. You must not and cannot write tool return results yourself.
+The system will execute the tool and return the result to you. Do not wrap the JSON in XML tags, code fences, or extra commentary.
 
 Option B - Output final content:
 When you have obtained enough information through tools, output the section content starting with "Final Answer:".
@@ -790,9 +792,44 @@ Completed section content (please read carefully to avoid repetition):
 - ✅ Write body text directly; use **bold** instead of subsection headings
 
 Please begin:
-1. First think (Thought) about what information this section needs
-2. Then call a tool (Action) to retrieve simulation data
+1. First decide what information this section needs
+2. Then output one JSON tool call to retrieve simulation data
 3. After collecting enough information, output Final Answer (plain body text, no headings at all)"""
+
+SECTION_SYSTEM_PROMPT_COMPACT_TEMPLATE = """\
+You are writing one section of a future prediction report based only on simulation data retrieved through tools.
+
+Report title: {report_title}
+Report summary: {report_summary}
+Simulation requirement: {simulation_requirement}
+Current section: {section_title}
+
+Rules:
+- Use only information retrieved from tools in this conversation.
+- Do not use Markdown headings (#, ##, ###) inside the section.
+- Do not include the section title in the body.
+- In one reply, do exactly one of these:
+  1. Output only one JSON object:
+     {{"name": "tool_name", "parameters": {{"param": "value"}}}}
+  2. Output final body text starting with "Final Answer:"
+- Never include both a JSON tool call and Final Answer in the same reply.
+- Do not wrap the JSON in XML tags, code fences, or extra commentary.
+
+Available tools:
+{tools_description}
+"""
+
+SECTION_USER_PROMPT_COMPACT_TEMPLATE = """\
+Completed section content:
+{previous_content}
+
+Write the section "{section_title}".
+
+Requirements:
+- First, output one JSON tool call to retrieve simulation data.
+- After enough evidence is collected, output Final Answer:
+- No headings inside the section body.
+"""
 
 # ── ReACT loop message templates ──
 
@@ -848,9 +885,9 @@ Prediction conditions: {simulation_requirement}
 {tools_description}
 
 [Tool call format]
-<tool_call>
+When you need a tool, output only one JSON object:
 {{"name": "tool_name", "parameters": {{"param_name": "param_value"}}}}
-</tool_call>
+Do not wrap the JSON in XML tags, code fences, or extra commentary.
 
 [Answer style]
 - Concise and direct; avoid lengthy explanations
@@ -955,6 +992,41 @@ class ReportAgent:
                 }
             }
         }
+
+    def _llm_chat_with_retry(
+        self,
+        messages: list,
+        temperature: float = 0.5,
+        max_tokens: int = 4096,
+        max_retries: int = 3,
+    ) -> Optional[str]:
+        """
+        Call self.llm.chat() with exponential backoff on 429 rate-limit errors.
+        Returns None if all retries are exhausted (caller handles None as before).
+        Works for both local Ollama and cloud APIs - LLMClient handles routing.
+        """
+        for attempt in range(max_retries):
+            try:
+                return self.llm.chat(
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+            except Exception as e:
+                err = str(e)
+                if self.llm.is_quota_exhausted_error(e):
+                    raise
+                if "429" in err or "rate" in err.lower():
+                    wait = 15.0 * (attempt + 1)
+                    logger.warning(
+                        f"LLM rate limited (attempt {attempt + 1}/{max_retries}). "
+                        f"Waiting {wait}s before retry..."
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
+        logger.error("Max retries exceeded for LLM chat call.")
+        return None
 
     def _execute_tool(self, tool_name: str, parameters: Dict[str, Any], report_context: str = "") -> str:
         """
@@ -1071,13 +1143,13 @@ class ReportAgent:
         """
         Parse tool calls from LLM response.
 
-        Supported formats (by priority):
-        1. <tool_call>{"name": "tool_name", "parameters": {...}}</tool_call>
-        2. Bare JSON (the entire response or a single line is a tool call JSON)
+        Supported formats:
+        1. Bare JSON (the entire response or a single line is a tool call JSON)
+        2. Legacy XML wrapper: <tool_call>{"name": "tool_name", "parameters": {...}}</tool_call>
         """
         tool_calls = []
 
-        # Format 1: XML-style (standard format)
+        # Legacy format: XML-style wrapper kept for backward compatibility.
         xml_pattern = r'<tool_call>\s*(\{.*?\})\s*</tool_call>'
         for match in re.finditer(xml_pattern, response, re.DOTALL):
             try:
@@ -1089,8 +1161,8 @@ class ReportAgent:
         if tool_calls:
             return tool_calls
 
-        # Format 2: Fallback - LLM outputs bare JSON without <tool_call> tags
-        # Only attempted when Format 1 matched nothing, to avoid false-matching JSON in body text
+        # Preferred format: bare JSON without XML tags.
+        # Only attempted when the legacy XML wrapper matched nothing, to avoid false-matching JSON in body text.
         stripped = response.strip()
         if stripped.startswith('{') and stripped.endswith('}'):
             try:
@@ -1209,6 +1281,8 @@ class ReportAgent:
             return outline
 
         except Exception as e:
+            if self.llm.is_quota_exhausted_error(e):
+                raise RuntimeError(f"Report generation blocked by LLM quota limit: {str(e)}") from e
             logger.error(f"Outline planning failed: {str(e)}")
             # Return default outline (3 sections as fallback)
             return ReportOutline(
@@ -1262,6 +1336,13 @@ class ReportAgent:
             section_title=section.title,
             tools_description=self._get_tools_description(),
         )
+        compact_system_prompt = SECTION_SYSTEM_PROMPT_COMPACT_TEMPLATE.format(
+            report_title=outline.title,
+            report_summary=outline.summary,
+            simulation_requirement=self.simulation_requirement,
+            section_title=section.title,
+            tools_description=self._get_tools_description(),
+        )
 
         # Build user prompt - each completed section truncated to max 4000 chars
         if previous_sections:
@@ -1278,11 +1359,16 @@ class ReportAgent:
             previous_content=previous_content,
             section_title=section.title,
         )
+        compact_user_prompt = SECTION_USER_PROMPT_COMPACT_TEMPLATE.format(
+            previous_content=previous_content,
+            section_title=section.title,
+        )
 
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
+        use_compact_prompt = False
 
         # ReACT loop
         tool_calls_count = 0
@@ -1291,6 +1377,7 @@ class ReportAgent:
         conflict_retries = 0  # Consecutive conflict count when tool call and Final Answer appear together
         used_tools = set()  # Track which tools have been called
         all_tools = {"insight_forge", "panorama_search", "quick_search", "interview_agents"}
+        auto_bootstrapped = False  # Whether we already seeded the section with a fallback tool call
 
         # Report context used for InsightForge sub-question generation
         report_context = f"Section title: {section.title}\nSimulation requirement: {self.simulation_requirement}"
@@ -1303,12 +1390,109 @@ class ReportAgent:
                     f"Deep retrieval and writing ({tool_calls_count}/{self.MAX_TOOL_CALLS_PER_SECTION})"
                 )
 
-            # Call LLM
-            response = self.llm.chat(
-                messages=messages,
-                temperature=0.5,
-                max_tokens=4096
-            )
+            # Call LLM - retries internally on 429 rate-limit errors
+            try:
+                response = self._llm_chat_with_retry(
+                    messages=messages,
+                    temperature=0.5,
+                    max_tokens=3072 if use_compact_prompt else 4096
+                )
+            except Exception as e:
+                error_text = str(e)
+                is_provider_5xx = "500" in error_text or "internal server error" in error_text.lower()
+                if self.llm.is_quota_exhausted_error(e):
+                    raise RuntimeError(f"Report generation blocked by LLM quota limit: {error_text}") from e
+                logger.warning(
+                    f"Section {section.title} iteration {iteration + 1}: "
+                    f"LLM call failed: {error_text}"
+                )
+
+                # If the provider fails before the first tool call, seed the section with a
+                # deterministic retrieval so we can continue from evidence instead of retrying
+                # the fragile "choose a tool" step over and over.
+                if is_provider_5xx and tool_calls_count == 0 and not auto_bootstrapped:
+                    use_compact_prompt = True
+                    messages[0] = {"role": "system", "content": compact_system_prompt}
+                    messages[1] = {"role": "user", "content": compact_user_prompt}
+                    logger.info(
+                        f"Section {section.title}: provider failed before first tool call; "
+                        "auto-bootstrapping insight_forge"
+                    )
+
+                    bootstrap_parameters = {
+                        "query": f"{section.title} - {self.simulation_requirement}",
+                        "report_context": report_context,
+                    }
+                    if self.report_logger:
+                        self.report_logger.log_tool_call(
+                            section_title=section.title,
+                            section_index=section_index,
+                            tool_name="insight_forge",
+                            parameters=bootstrap_parameters,
+                            iteration=iteration + 1
+                        )
+
+                    bootstrap_result = self._execute_tool(
+                        "insight_forge",
+                        bootstrap_parameters,
+                        report_context=report_context
+                    )
+
+                    if self.report_logger:
+                        self.report_logger.log_tool_result(
+                            section_title=section.title,
+                            section_index=section_index,
+                            tool_name="insight_forge",
+                            result=bootstrap_result,
+                            iteration=iteration + 1
+                        )
+
+                    tool_calls_count += 1
+                    used_tools.add("insight_forge")
+                    auto_bootstrapped = True
+
+                    unused_tools = all_tools - used_tools
+                    unused_hint = ""
+                    if unused_tools and tool_calls_count < self.MAX_TOOL_CALLS_PER_SECTION:
+                        unused_hint = REACT_UNUSED_TOOLS_HINT.format(unused_list=", ".join(unused_tools))
+
+                    messages.append({
+                        "role": "assistant",
+                        "content": json.dumps(
+                            {"name": "insight_forge", "parameters": bootstrap_parameters},
+                            ensure_ascii=False
+                        ),
+                    })
+                    messages.append({
+                        "role": "user",
+                        "content": REACT_OBSERVATION_TEMPLATE.format(
+                            tool_name="insight_forge",
+                            result=bootstrap_result,
+                            tool_calls_count=tool_calls_count,
+                            max_tool_calls=self.MAX_TOOL_CALLS_PER_SECTION,
+                            used_tools_str=", ".join(sorted(used_tools)),
+                            unused_hint=unused_hint,
+                        ),
+                    })
+                    continue
+
+                # If the large ReACT prompt trips provider-side 5xx errors, retry with a shorter prompt.
+                if (not use_compact_prompt) and is_provider_5xx:
+                    use_compact_prompt = True
+                    messages[0] = {"role": "system", "content": compact_system_prompt}
+                    messages[1] = {"role": "user", "content": compact_user_prompt}
+                    logger.info(
+                        f"Section {section.title}: switching to compact section prompt after provider error"
+                    )
+                    continue
+
+                if iteration < max_iterations - 1:
+                    messages.append({
+                        "role": "user",
+                        "content": "The previous model call failed. Retry and continue with the same task."
+                    })
+                    continue
+                raise
 
             # Check if LLM returned None (API error or empty content)
             if response is None:
@@ -1344,23 +1528,18 @@ class ReportAgent:
                         "content": (
                             "[Format error] Your reply contains both a tool call and a Final Answer, which is not allowed.\n"
                             "Each reply can only do one of the following two things:\n"
-                            "- Call one tool (output one <tool_call> block, do not write Final Answer)\n"
-                            "- Output final content (start with 'Final Answer:', do not include <tool_call>)\n"
+                            "- Call one tool (output only one JSON object with name and parameters, do not write Final Answer)\n"
+                            "- Output final content (start with 'Final Answer:', do not include a JSON tool call)\n"
                             "Please reply again, doing only one of these things."
                         ),
                     })
                     continue
                 else:
-                    # Third time: degraded handling — truncate to first tool call and force execute
+                    # Third time: degraded handling — keep the first parsed tool call and ignore the final answer
                     logger.warning(
                         f"Section {section.title}: {conflict_retries} consecutive conflicts; "
-                        "degrading to truncate and execute first tool call"
+                        "degrading to execute the first parsed tool call"
                     )
-                    first_tool_end = response.find('</tool_call>')
-                    if first_tool_end != -1:
-                        response = response[:first_tool_end + len('</tool_call>')]
-                        tool_calls = self._parse_tool_calls(response)
-                        has_tool_calls = bool(tool_calls)
                     has_final_answer = False
                     conflict_retries = 0
 
@@ -1507,11 +1686,15 @@ class ReportAgent:
         logger.warning(f"Section {section.title} reached max iterations; forcing generation")
         messages.append({"role": "user", "content": REACT_FORCE_FINAL_MSG})
 
-        response = self.llm.chat(
-            messages=messages,
-            temperature=0.5,
-            max_tokens=4096
-        )
+        try:
+            response = self._llm_chat_with_retry(
+                messages=messages,
+                temperature=0.5,
+                max_tokens=3072 if use_compact_prompt else 4096
+            )
+        except Exception as e:
+            logger.error(f"Section {section.title}: forced wrap-up call failed: {e}")
+            response = None
 
         # Check if LLM returned None during forced wrap-up
         if response is None:
@@ -1829,10 +2012,18 @@ class ReportAgent:
         max_iterations = 2  # Reduced iteration rounds
 
         for iteration in range(max_iterations):
-            response = self.llm.chat(
+            response = self._llm_chat_with_retry(
                 messages=messages,
                 temperature=0.5
             )
+
+            if response is None:
+                logger.warning(f"Chat iteration {iteration + 1}: LLM returned None")
+                if iteration < max_iterations - 1:
+                    messages.append({"role": "assistant", "content": "(empty response)"})
+                    messages.append({"role": "user", "content": "Please continue."})
+                    continue
+                break
 
             # Parse tool calls
             tool_calls = self._parse_tool_calls(response)
@@ -1869,10 +2060,13 @@ class ReportAgent:
             })
 
         # Max iterations reached; get final response
-        final_response = self.llm.chat(
+        final_response = self._llm_chat_with_retry(
             messages=messages,
             temperature=0.5
         )
+
+        if final_response is None:
+            final_response = "(This reply failed to generate because the LLM returned no content.)"
 
         # Clean response
         clean_response = re.sub(r'<tool_call>.*?</tool_call>', '', final_response, flags=re.DOTALL)

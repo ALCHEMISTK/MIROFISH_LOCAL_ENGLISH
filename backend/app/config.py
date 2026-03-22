@@ -29,6 +29,10 @@ class Config:
     LLM_API_KEY = os.environ.get('LLM_API_KEY', 'ollama')  # Ollama accepts any non-empty string
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
     LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'qwen2.5:7b')
+    LLM_QUOTA_WAIT_ENABLED = os.environ.get('LLM_QUOTA_WAIT_ENABLED', 'True').lower() == 'true'
+    LLM_QUOTA_POLL_SECONDS = float(os.environ.get('LLM_QUOTA_POLL_SECONDS', '10'))
+    # 0 means wait indefinitely until quota becomes available again.
+    LLM_QUOTA_MAX_WAIT_SECONDS = float(os.environ.get('LLM_QUOTA_MAX_WAIT_SECONDS', '0'))
 
     # Ollama + LightRAG configuration (local GraphRAG, replaces Zep Cloud)
     OLLAMA_BASE_URL = os.environ.get('OLLAMA_BASE_URL', 'http://localhost:11434')

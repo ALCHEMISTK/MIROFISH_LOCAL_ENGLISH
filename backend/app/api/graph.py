@@ -11,7 +11,7 @@ from flask import request, jsonify
 from . import graph_bp
 from ..config import Config
 from ..services.ontology_generator import OntologyGenerator
-from ..services.graph_builder import GraphBuilderService
+from ..services.graph_builder import GraphBuilderService, format_graph_build_error
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
@@ -389,7 +389,7 @@ def build_graph():
                 # Create graph
                 task_manager.update_task(
                     task_id,
-                    message="Creating Zep graph...",
+                    message="Creating LightRAG graph...",
                     progress=10
                 )
                 graph_id = builder.create_graph(name=graph_name)
@@ -460,18 +460,20 @@ def build_graph():
                 )
 
             except Exception as e:
+                friendly_error = format_graph_build_error(e)
+
                 # Update project status to failed
-                build_logger.error(f"[{task_id}] Graph building failed: {str(e)}")
+                build_logger.error(f"[{task_id}] Graph building failed: {friendly_error}")
                 build_logger.debug(traceback.format_exc())
 
                 project.status = ProjectStatus.FAILED
-                project.error = str(e)
+                project.error = friendly_error
                 ProjectManager.save_project(project)
 
                 task_manager.update_task(
                     task_id,
                     status=TaskStatus.FAILED,
-                    message=f"Build failed: {str(e)}",
+                    message=f"Build failed: {friendly_error}",
                     error=traceback.format_exc()
                 )
 

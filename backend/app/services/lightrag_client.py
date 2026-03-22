@@ -11,7 +11,9 @@ event-loop boundaries (which would raise 'bound to a different event loop').
 import os
 import asyncio
 import threading
+import concurrent.futures
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 from ..config import Config
 from ..utils.logger import get_logger
@@ -20,6 +22,71 @@ logger = get_logger('mirofish.lightrag_client')
 
 _rag_instances: Dict[str, object] = {}
 _rag_lock = threading.Lock()
+
+
+def _is_local_ollama(base_url: str) -> bool:
+    """Return True when the configured LLM base URL points to a local Ollama host."""
+    try:
+        host = (urlparse(base_url).hostname or "").lower()
+    except Exception:
+        host = ""
+    return host in {"localhost", "127.0.0.1", "0.0.0.0"}
+
+
+def build_lightrag_llm_binding():
+    """
+    Select the correct LightRAG LLM binding from the app config.
+
+    - Local Ollama URL -> LightRAG Ollama client
+    - Remote/cloud URL -> LightRAG OpenAI-compatible client
+    """
+    if _is_local_ollama(Config.LLM_BASE_URL):
+        from lightrag.llm.ollama import ollama_model_complete
+
+        logger.info(f"LightRAG LLM binding: local Ollama via {Config.OLLAMA_BASE_URL}")
+        return ollama_model_complete, {
+            "host": Config.OLLAMA_BASE_URL,
+            "options": {"num_ctx": 32768},
+        }
+
+    try:
+        from lightrag.llm.openai import openai_complete_if_cache as openai_llm_complete
+        use_if_cache = True
+    except ImportError:
+        from lightrag.llm.openai import openai_complete as openai_llm_complete
+        use_if_cache = False
+
+    logger.info(f"LightRAG LLM binding: OpenAI-compatible API via {Config.LLM_BASE_URL}")
+
+    async def cloud_llm_func(
+        prompt,
+        model=None,
+        system_prompt=None,
+        history_messages=None,
+        **kwargs,
+    ):
+        history_messages = history_messages or []
+        if use_if_cache:
+            return await openai_llm_complete(
+                model=model or Config.LLM_MODEL_NAME,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                history_messages=history_messages,
+                api_key=Config.LLM_API_KEY,
+                base_url=Config.LLM_BASE_URL,
+                **kwargs,
+            )
+
+        return await openai_llm_complete(
+            prompt=prompt,
+            system_prompt=system_prompt,
+            history_messages=history_messages,
+            api_key=Config.LLM_API_KEY,
+            base_url=Config.LLM_BASE_URL,
+            **kwargs,
+        )
+
+    return cloud_llm_func, {}
 
 
 # ---------------------------------------------------------------------------
@@ -45,7 +112,11 @@ class _LoopThread:
     def run(self, coro, timeout: Optional[float] = None):
         """Submit *coro* to the loop and block the calling thread until done."""
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=timeout)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            future.cancel()
+            raise TimeoutError(f"LightRAG coroutine timed out after {timeout} seconds")
 
 
 # Module-level singleton — created once when lightrag_client is first imported.
@@ -110,10 +181,10 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
 
         try:
             from lightrag import LightRAG
-            from lightrag.llm.ollama import ollama_model_complete
 
             ollama_host = Config.OLLAMA_BASE_URL
             embed_model = Config.OLLAMA_EMBED_MODEL
+            llm_model_func, llm_model_kwargs = build_lightrag_llm_binding()
 
             # Detect actual embedding dimension from the configured model
             # so we can configure LightRAG's vector DB correctly.
@@ -141,12 +212,9 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
 
             rag = LightRAG(
                 working_dir=working_dir,
-                llm_model_func=ollama_model_complete,
+                llm_model_func=llm_model_func,
                 llm_model_name=Config.LLM_MODEL_NAME,
-                llm_model_kwargs={
-                    "host": ollama_host,
-                    "options": {"num_ctx": 32768},
-                },
+                llm_model_kwargs=llm_model_kwargs,
                 embedding_func=_embed,
             )
 
