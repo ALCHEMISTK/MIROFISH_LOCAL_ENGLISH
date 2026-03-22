@@ -66,18 +66,7 @@ def build_lightrag_llm_binding():
         **kwargs,
     ):
         history_messages = history_messages or []
-        if use_if_cache:
-            return await openai_llm_complete(
-                model=model or Config.LLM_MODEL_NAME,
-                prompt=prompt,
-                system_prompt=system_prompt,
-                history_messages=history_messages,
-                api_key=Config.LLM_API_KEY,
-                base_url=Config.LLM_BASE_URL,
-                **kwargs,
-            )
-
-        return await openai_llm_complete(
+        call_kwargs = dict(
             prompt=prompt,
             system_prompt=system_prompt,
             history_messages=history_messages,
@@ -85,6 +74,30 @@ def build_lightrag_llm_binding():
             base_url=Config.LLM_BASE_URL,
             **kwargs,
         )
+        if use_if_cache:
+            call_kwargs["model"] = model or Config.LLM_MODEL_NAME
+
+        # Retry with exponential backoff on rate-limit / retry errors.
+        # LightRAG's internal tenacity retries are too short (~0.3-1s);
+        # this outer loop waits longer so the quota can recover.
+        max_attempts = 6
+        for attempt in range(1, max_attempts + 1):
+            try:
+                return await openai_llm_complete(**call_kwargs)
+            except Exception as e:
+                from tenacity import RetryError
+                from openai import RateLimitError
+                is_rate_limit = isinstance(e, (RateLimitError, RetryError))
+                if not is_rate_limit:
+                    raise
+                if attempt == max_attempts:
+                    raise
+                wait = min(2 ** attempt, 60)  # 2, 4, 8, 16, 32, 60s
+                logger.warning(
+                    f"Rate limited (attempt {attempt}/{max_attempts}), "
+                    f"waiting {wait}s before retry..."
+                )
+                await asyncio.sleep(wait)
 
     return cloud_llm_func, {}
 
@@ -239,12 +252,24 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                         [d.embedding for d in resp.data], dtype=np.float32
                     )
 
+            # Reduce concurrency for cloud APIs to avoid rate limits.
+            # Ollama (local) can handle high parallelism; cloud APIs cannot.
+            concurrency_kwargs = {}
+            if not use_local_ollama:
+                concurrency_kwargs = {
+                    "llm_model_max_async": 2,
+                    "max_parallel_insert": 1,
+                    "embedding_func_max_async": 4,
+                }
+                logger.info("Cloud API detected — throttling concurrency to avoid rate limits")
+
             rag = LightRAG(
                 working_dir=working_dir,
                 llm_model_func=llm_model_func,
                 llm_model_name=Config.LLM_MODEL_NAME,
                 llm_model_kwargs=llm_model_kwargs,
                 embedding_func=_embed,
+                **concurrency_kwargs,
             )
 
             # Store early so other threads won't create a duplicate instance
