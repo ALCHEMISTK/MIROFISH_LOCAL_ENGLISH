@@ -145,17 +145,32 @@ class GraphBuilderService:
                 message=f"Text split into {total_chunks} chunks"
             )
 
-            # 4. Insert chunks into LightRAG (15%–90%)
+            # 4. Insert chunks into LightRAG (20%–80%)
             self.add_text_batches(
                 graph_id, chunks, batch_size,
                 lambda msg, prog: self.task_manager.update_task(
                     task_id,
-                    progress=20 + int(prog * 70),  # 20–90%
+                    progress=20 + int(prog * 60),  # 20–80%
                     message=msg
                 )
             )
 
-            # 5. Get final graph info
+            # 5. Deduplicate similar entities (80%–90%)
+            self.task_manager.update_task(
+                task_id,
+                progress=80,
+                message="Deduplicating similar entities..."
+            )
+            self._dedup_entities(
+                graph_id,
+                progress_callback=lambda msg, prog: self.task_manager.update_task(
+                    task_id,
+                    progress=80 + int(prog * 10),  # 80–90%
+                    message=msg
+                )
+            )
+
+            # 6. Get final graph info
             self.task_manager.update_task(
                 task_id,
                 progress=90,
@@ -326,6 +341,146 @@ class GraphBuilderService:
             "node_count": len(nodes_data),
             "edge_count": len(edges_data),
         }
+
+    def _dedup_entities(self, graph_id: str, progress_callback: Optional[Callable] = None):
+        """
+        Post-build entity deduplication.
+        Finds near-duplicate entity names via heuristics + LLM, then merges them
+        using LightRAG's amerge_entities() API.
+        """
+        nodes_raw, _ = self._read_graphml(graph_id)
+        if len(nodes_raw) < 2:
+            return
+
+        # Collect all entity names
+        entity_names = []
+        for node_id, data in nodes_raw:
+            name = data.get("entity_name", "") or str(node_id)
+            if name:
+                entity_names.append(name)
+
+        if len(entity_names) < 2:
+            return
+
+        if progress_callback:
+            progress_callback("Deduplicating entities...", 0.0)
+
+        # ── Step 1: cheap heuristic merges (case-insensitive) ──
+        from collections import defaultdict
+        norm_groups: Dict[str, List[str]] = defaultdict(list)
+        for name in entity_names:
+            key = name.strip().lower()
+            norm_groups[key].append(name)
+
+        heuristic_merges = []
+        already_merged = set()
+        for key, names in norm_groups.items():
+            unique = list(dict.fromkeys(names))  # preserve order, remove exact dupes
+            if len(unique) > 1:
+                # Pick the most common casing as canonical
+                canonical = max(unique, key=lambda n: names.count(n))
+                aliases = [n for n in unique if n != canonical]
+                heuristic_merges.append((canonical, aliases))
+                already_merged.update(aliases)
+
+        # Execute heuristic merges
+        rag = get_rag(graph_id, create_if_missing=False)
+        merge_count = 0
+        for canonical, aliases in heuristic_merges:
+            try:
+                run_async(rag.amerge_entities(
+                    source_entities=aliases,
+                    target_entity=canonical,
+                    merge_strategy={"description": "concatenate", "entity_type": "keep_first"},
+                ))
+                merge_count += 1
+                logger.info(f"Merged (case): {aliases} → {canonical}")
+            except Exception as e:
+                logger.warning(f"Failed to merge {aliases} → {canonical}: {e}")
+
+        # ── Step 2: LLM-based semantic dedup ──
+        # Collect remaining unique names (exclude already-merged aliases)
+        remaining = [n for n in dict.fromkeys(entity_names) if n not in already_merged]
+        if len(remaining) < 3:
+            if progress_callback:
+                progress_callback(f"Dedup complete: {merge_count} groups merged", 1.0)
+            return
+
+        if progress_callback:
+            progress_callback(f"Analyzing {len(remaining)} entities for duplicates...", 0.3)
+
+        try:
+            from ..utils.llm_client import LLMClient
+            llm = LLMClient()
+
+            # Batch into chunks of ~150 names per call
+            batch_size = 150
+            llm_merges = []
+            for batch_start in range(0, len(remaining), batch_size):
+                batch = remaining[batch_start:batch_start + batch_size]
+                groups = self._llm_find_duplicates(llm, batch)
+                llm_merges.extend(groups)
+
+            # Execute LLM-identified merges
+            for group in llm_merges:
+                canonical = group.get("canonical_name", "")
+                aliases = [a for a in group.get("aliases", []) if a != canonical and a in remaining]
+                if not canonical or not aliases:
+                    continue
+                try:
+                    run_async(rag.amerge_entities(
+                        source_entities=aliases,
+                        target_entity=canonical,
+                        merge_strategy={"description": "concatenate", "entity_type": "keep_first"},
+                    ))
+                    merge_count += 1
+                    logger.info(f"Merged (LLM): {aliases} → {canonical}")
+                except Exception as e:
+                    logger.warning(f"Failed to merge {aliases} → {canonical}: {e}")
+
+        except Exception as e:
+            logger.warning(f"LLM dedup step failed (non-fatal): {e}")
+
+        if progress_callback:
+            progress_callback(f"Dedup complete: {merge_count} groups merged", 1.0)
+
+    def _llm_find_duplicates(self, llm, entity_names: List[str]) -> List[Dict[str, Any]]:
+        """Ask the LLM to identify groups of entity names that refer to the same thing."""
+        names_str = "\n".join(f"- {n}" for n in entity_names)
+        prompt = f"""You are given a list of entity names extracted from a knowledge graph.
+Identify groups of names that clearly refer to the **same real-world entity** —
+for example abbreviations, acronyms, alternate spellings, translations,
+or names with/without titles/prefixes.
+
+Only group names you are confident are the same entity. Do NOT group names
+that are merely related (e.g. "Apple Inc" and "iPhone" are related but not the same).
+
+Entity names:
+{names_str}
+
+Return a JSON object with a single key "groups" containing an array.
+Each group has:
+- "canonical_name": the best/most complete version of the name (must be one of the input names exactly)
+- "aliases": array of the other names in the group (must be exact input names)
+
+If no duplicates are found, return {{"groups": []}}.
+Return ONLY valid JSON, no other text."""
+
+        try:
+            response = llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.1,
+                max_tokens=4096,
+                response_format={"type": "json_object"},
+            )
+            result = llm._parse_json_response(response)
+            groups = result.get("groups", [])
+            if not isinstance(groups, list):
+                return []
+            return groups
+        except Exception as e:
+            logger.warning(f"LLM dedup parse failed: {e}")
+            return []
 
     def delete_graph(self, graph_id: str):
         """Delete the graph's working directory and invalidate cached instance."""
