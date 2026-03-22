@@ -18,7 +18,7 @@ def get_status():
         'has_llm_key': bool(settings.get('llm_api_key')),
         'llm_base_url': settings.get('llm_base_url', ''),
         'llm_model_name': settings.get('llm_model_name', ''),
-        'ollama_embed_model': settings.get('ollama_embed_model', 'nomic-embed-text'),
+        'embed_model': settings.get('embed_model', 'nomic-embed-text'),
     })
 
 
@@ -31,7 +31,7 @@ def save_config():
 
     settings = load_settings()
     for key in ['llm_api_key', 'llm_base_url', 'llm_model_name',
-                'ollama_embed_model',
+                'embed_model',
                 'llm_boost_api_key', 'llm_boost_base_url', 'llm_boost_model_name']:
         if key in data:
             settings[key] = data[key]
