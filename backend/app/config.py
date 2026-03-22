@@ -42,6 +42,7 @@ class Config:
     EMBED_MODEL = os.environ.get('EMBED_MODEL',
                                  os.environ.get('OLLAMA_EMBED_MODEL', 'nomic-embed-text'))
     LIGHTRAG_DATA_DIR = os.path.join(os.path.dirname(__file__), '../data/lightrag_graphs')
+    LIGHTRAG_MAX_GRAPH_NODES = int(os.environ.get('LIGHTRAG_MAX_GRAPH_NODES', '1000'))
 
     # File upload
     MAX_CONTENT_LENGTH = 50 * 1024 * 1024  # 50MB

@@ -269,6 +269,7 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 llm_model_name=Config.LLM_MODEL_NAME,
                 llm_model_kwargs=llm_model_kwargs,
                 embedding_func=_embed,
+                max_graph_nodes=Config.LIGHTRAG_MAX_GRAPH_NODES,
                 **concurrency_kwargs,
             )
 
