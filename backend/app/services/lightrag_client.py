@@ -121,18 +121,10 @@ def build_lightrag_llm_binding():
     """
     Select the correct LightRAG LLM binding from the app config.
 
-    - Local Ollama URL -> LightRAG Ollama client
-    - Remote/cloud URL -> LightRAG OpenAI-compatible client
+    Always uses the OpenAI-compatible endpoint so that all fixes
+    (thinking model /no_think, rate limiting, retry logic) apply uniformly
+    — even for local Ollama.
     """
-    if _is_local_ollama(Config.LLM_BASE_URL):
-        from lightrag.llm.ollama import ollama_model_complete
-
-        logger.info(f"LightRAG LLM binding: local Ollama via {Config.OLLAMA_BASE_URL}")
-        return ollama_model_complete, {
-            "host": Config.OLLAMA_BASE_URL,
-            "options": {"num_ctx": 32768},
-        }
-
     try:
         from lightrag.llm.openai import openai_complete_if_cache as openai_llm_complete
         use_if_cache = True
@@ -140,7 +132,14 @@ def build_lightrag_llm_binding():
         from lightrag.llm.openai import openai_complete as openai_llm_complete
         use_if_cache = False
 
-    logger.info(f"LightRAG LLM binding: OpenAI-compatible API via {Config.LLM_BASE_URL}")
+    is_local = _is_local_ollama(Config.LLM_BASE_URL)
+    # For local Ollama, use the /v1 OpenAI-compatible endpoint
+    effective_base_url = Config.LLM_BASE_URL
+    if is_local:
+        base = Config.OLLAMA_BASE_URL.rstrip("/")
+        effective_base_url = f"{base}/v1" if not base.endswith("/v1") else base
+
+    logger.info(f"LightRAG LLM binding: {'local Ollama' if is_local else 'OpenAI-compatible API'} via {effective_base_url}")
 
     # Detect thinking models that need /no_think
     _model_lower = Config.LLM_MODEL_NAME.lower()
@@ -166,8 +165,8 @@ def build_lightrag_llm_binding():
             prompt=prompt,
             system_prompt=effective_system,
             history_messages=history_messages,
-            api_key=Config.LLM_API_KEY,
-            base_url=Config.LLM_BASE_URL,
+            api_key=Config.LLM_API_KEY or "ollama",
+            base_url=effective_base_url,
             **kwargs,
         )
         if use_if_cache:
@@ -470,10 +469,16 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                         limiter.release()
 
             # LightRAG concurrency settings.
-            # For cloud APIs, we start with moderate concurrency and let the
-            # AdaptiveRateLimiter dynamically find the optimal throughput.
-            concurrency_kwargs = {}
-            if not use_local_ollama:
+            # Cloud APIs: high concurrency with adaptive rate limiter.
+            # Local Ollama: moderate concurrency (hardware-bound, not rate-limited).
+            if use_local_ollama:
+                concurrency_kwargs = {
+                    "llm_model_max_async": 4,
+                    "max_parallel_insert": 2,
+                    "embedding_func_max_async": 8,
+                }
+                logger.info("Local Ollama: concurrency llm=4, embed=8")
+            else:
                 concurrency_kwargs = {
                     "llm_model_max_async": 32,
                     "max_parallel_insert": 8,
