@@ -517,11 +517,15 @@ class OasisProfileGenerator:
 
         for attempt in range(max_attempts):
             try:
+                # Disable thinking mode for qwen3 models
+                user_content = prompt
+                if 'qwen3' in self.model_name.lower() or 'qwq' in self.model_name.lower():
+                    user_content = prompt + " /no_think"
                 kwargs = dict(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": self._get_system_prompt(is_individual)},
-                        {"role": "user", "content": prompt}
+                        {"role": "user", "content": user_content}
                     ],
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
                     max_tokens=2048,

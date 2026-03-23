@@ -142,6 +142,10 @@ def build_lightrag_llm_binding():
 
     logger.info(f"LightRAG LLM binding: OpenAI-compatible API via {Config.LLM_BASE_URL}")
 
+    # Detect thinking models that need /no_think
+    _model_lower = Config.LLM_MODEL_NAME.lower()
+    _is_thinking_model = 'qwen3' in _model_lower or 'qwq' in _model_lower
+
     async def cloud_llm_func(
         prompt,
         model=None,
@@ -150,8 +154,12 @@ def build_lightrag_llm_binding():
         **kwargs,
     ):
         history_messages = history_messages or []
+        # Disable thinking mode for qwen3 models
+        effective_prompt = prompt
+        if _is_thinking_model and "/no_think" not in prompt:
+            effective_prompt = prompt + " /no_think"
         call_kwargs = dict(
-            prompt=prompt,
+            prompt=effective_prompt,
             system_prompt=system_prompt,
             history_messages=history_messages,
             api_key=Config.LLM_API_KEY,

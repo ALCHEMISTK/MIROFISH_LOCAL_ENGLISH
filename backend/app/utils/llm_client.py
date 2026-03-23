@@ -41,6 +41,24 @@ class LLMClient:
             base_url=self.base_url
         )
 
+    @property
+    def _is_thinking_model(self) -> bool:
+        """Detect models that use thinking mode (qwen3, etc.)."""
+        m = self.model.lower()
+        return 'qwen3' in m or 'qwq' in m
+
+    def _inject_no_think(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """For thinking models, append /no_think to the last user message."""
+        if not self._is_thinking_model:
+            return messages
+        messages = [m.copy() for m in messages]
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                if "/no_think" not in m["content"]:
+                    m["content"] = m["content"] + " /no_think"
+                break
+        return messages
+
     def _clean_content(self, content: Optional[str]) -> str:
         """Normalize model output into plain text."""
         if content is None:
@@ -136,7 +154,7 @@ class LLMClient:
         """
         kwargs = {
             "model": self.model,
-            "messages": messages,
+            "messages": self._inject_no_think(messages),
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
@@ -150,12 +168,18 @@ class LLMClient:
         quota_wait_started_at = None
         quota_wait_logged_at = None
 
+        _response_format_failed = False
         while True:
             try:
                 response = self.client.chat.completions.create(**kwargs)
                 content = self._clean_content(response.choices[0].message.content)
                 if content:
                     return content
+                # If response_format is set and we get empty, retry without it
+                if not _response_format_failed and "response_format" in kwargs:
+                    _response_format_failed = True
+                    kwargs.pop("response_format")
+                    continue
                 raise ValueError("LLM returned empty response")
             except Exception as exc:
                 last_error = exc
