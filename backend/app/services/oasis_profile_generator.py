@@ -517,18 +517,27 @@ class OasisProfileGenerator:
 
         for attempt in range(max_attempts):
             try:
-                response = self.client.chat.completions.create(
+                kwargs = dict(
                     model=self.model_name,
                     messages=[
                         {"role": "system", "content": self._get_system_prompt(is_individual)},
                         {"role": "user", "content": prompt}
                     ],
-                    response_format={"type": "json_object"},
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
                     max_tokens=2048,
                 )
+                try:
+                    response = self.client.chat.completions.create(
+                        **kwargs, response_format={"type": "json_object"}
+                    )
+                except Exception:
+                    response = self.client.chat.completions.create(**kwargs)
 
-                content = response.choices[0].message.content
+                content = response.choices[0].message.content or ""
+
+                # Strip thinking blocks (qwen3 thinking mode)
+                import re as _re
+                content = _re.sub(r'<think>.*?</think>', '', content, flags=_re.DOTALL).strip()
 
                 # Check if truncated (finish_reason is not 'stop')
                 finish_reason = response.choices[0].finish_reason

@@ -469,12 +469,19 @@ If no duplicates are found, return {{"groups": []}}.
 Return ONLY valid JSON, no other text."""
 
         try:
-            response = llm.chat(
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=2048,
-                response_format={"type": "json_object"},
-            )
+            try:
+                response = llm.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=2048,
+                    response_format={"type": "json_object"},
+                )
+            except Exception:
+                response = llm.chat(
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.1,
+                    max_tokens=2048,
+                )
             result = llm._parse_json_response(response)
             groups = result.get("groups", [])
             if not isinstance(groups, list):
