@@ -154,13 +154,17 @@ def build_lightrag_llm_binding():
         **kwargs,
     ):
         history_messages = history_messages or []
-        # Disable thinking mode for qwen3 models
-        effective_prompt = prompt
-        if _is_thinking_model and "/no_think" not in prompt:
-            effective_prompt = prompt + " /no_think"
+        # Disable thinking mode for qwen3 models via system prompt
+        effective_system = system_prompt
+        if _is_thinking_model:
+            if effective_system:
+                if "/no_think" not in effective_system:
+                    effective_system = effective_system + "\n/no_think"
+            else:
+                effective_system = "/no_think"
         call_kwargs = dict(
-            prompt=effective_prompt,
-            system_prompt=system_prompt,
+            prompt=prompt,
+            system_prompt=effective_system,
             history_messages=history_messages,
             api_key=Config.LLM_API_KEY,
             base_url=Config.LLM_BASE_URL,

@@ -48,15 +48,20 @@ class LLMClient:
         return 'qwen3' in m or 'qwq' in m
 
     def _inject_no_think(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
-        """For thinking models, append /no_think to the last user message."""
+        """For thinking models, inject /no_think into the system prompt."""
         if not self._is_thinking_model:
             return messages
         messages = [m.copy() for m in messages]
-        for m in reversed(messages):
-            if m.get("role") == "user":
+        # Inject into system prompt (qwen3 checks system prompt for /no_think)
+        has_system = False
+        for m in messages:
+            if m.get("role") == "system":
                 if "/no_think" not in m["content"]:
-                    m["content"] = m["content"] + " /no_think"
+                    m["content"] = m["content"] + "\n/no_think"
+                has_system = True
                 break
+        if not has_system:
+            messages.insert(0, {"role": "system", "content": "/no_think"})
         return messages
 
     def _clean_content(self, content: Optional[str]) -> str:
@@ -158,6 +163,10 @@ class LLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
+
+        # For thinking models on Ollama, disable thinking via extra_body
+        if self._is_thinking_model and 'localhost' in self.base_url:
+            kwargs["extra_body"] = {"options": {"num_predict": max_tokens}}
 
         if response_format:
             kwargs["response_format"] = response_format

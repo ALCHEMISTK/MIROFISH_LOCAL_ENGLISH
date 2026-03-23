@@ -518,18 +518,21 @@ class OasisProfileGenerator:
         for attempt in range(max_attempts):
             try:
                 # Disable thinking mode for qwen3 models
-                user_content = prompt
-                if 'qwen3' in self.model_name.lower() or 'qwq' in self.model_name.lower():
-                    user_content = prompt + " /no_think"
+                _is_thinking = 'qwen3' in self.model_name.lower() or 'qwq' in self.model_name.lower()
+                system_prompt = self._get_system_prompt(is_individual)
+                if _is_thinking:
+                    system_prompt = system_prompt + "\n/no_think"
                 kwargs = dict(
                     model=self.model_name,
                     messages=[
-                        {"role": "system", "content": self._get_system_prompt(is_individual)},
-                        {"role": "user", "content": user_content}
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": prompt}
                     ],
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
                     max_tokens=2048,
                 )
+                if _is_thinking and 'localhost' in (getattr(self.client, '_base_url', '') or ''):
+                    kwargs["extra_body"] = {"options": {"num_predict": 2048}}
                 try:
                     response = self.client.chat.completions.create(
                         **kwargs, response_format={"type": "json_object"}
