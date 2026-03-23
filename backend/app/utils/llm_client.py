@@ -165,7 +165,7 @@ class LLMClient:
         }
 
         # For thinking models on Ollama, disable thinking via extra_body
-        if self._is_thinking_model and 'localhost' in self.base_url:
+        if self._is_thinking_model and 'localhost' in str(self.base_url):
             kwargs["extra_body"] = {"options": {"num_predict": max_tokens}}
 
         if response_format:
