@@ -54,6 +54,59 @@ class Config:
     DEFAULT_CHUNK_OVERLAP = 100
 
     # OASIS simulation
+    # SIMULATION_MODE: "fast" or "slow" (precise).
+    # fast  = 24h sim, 120min/round, 12 rounds, fewer agents, semaphore 60
+    # slow  = 72h sim, 30min/round,  144 rounds, more agents,  semaphore 30
+    SIMULATION_MODE = os.environ.get('SIMULATION_MODE', 'fast').lower()
+
+    # Presets (derived from SIMULATION_MODE, overridable individually via env)
+    _PRESETS = {
+        'fast': {
+            'total_simulation_hours': 24,
+            'minutes_per_round': 120,
+            'max_rounds': 12,
+            'agents_per_hour_min': 3,
+            'agents_per_hour_max': 10,
+            'oasis_semaphore': 60,
+        },
+        'slow': {
+            'total_simulation_hours': 72,
+            'minutes_per_round': 30,
+            'max_rounds': 144,
+            'agents_per_hour_min': 5,
+            'agents_per_hour_max': 20,
+            'oasis_semaphore': 30,
+        },
+    }
+
+    @classmethod
+    def _preset(cls, key):
+        return cls._PRESETS.get(cls.SIMULATION_MODE, cls._PRESETS['fast'])[key]
+
+    @classmethod
+    def get_sim_total_hours(cls):
+        return int(os.environ.get('SIM_TOTAL_HOURS', cls._preset('total_simulation_hours')))
+
+    @classmethod
+    def get_sim_minutes_per_round(cls):
+        return int(os.environ.get('SIM_MINUTES_PER_ROUND', cls._preset('minutes_per_round')))
+
+    @classmethod
+    def get_sim_max_rounds(cls):
+        return int(os.environ.get('SIM_MAX_ROUNDS', cls._preset('max_rounds')))
+
+    @classmethod
+    def get_sim_agents_per_hour_min(cls):
+        return int(os.environ.get('SIM_AGENTS_PER_HOUR_MIN', cls._preset('agents_per_hour_min')))
+
+    @classmethod
+    def get_sim_agents_per_hour_max(cls):
+        return int(os.environ.get('SIM_AGENTS_PER_HOUR_MAX', cls._preset('agents_per_hour_max')))
+
+    @classmethod
+    def get_sim_oasis_semaphore(cls):
+        return int(os.environ.get('SIM_OASIS_SEMAPHORE', cls._preset('oasis_semaphore')))
+
     OASIS_DEFAULT_MAX_ROUNDS = int(os.environ.get('OASIS_DEFAULT_MAX_ROUNDS', '10'))
     OASIS_SIMULATION_DATA_DIR = os.path.join(os.path.dirname(__file__), '../uploads/simulations')
 

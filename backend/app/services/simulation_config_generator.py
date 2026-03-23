@@ -83,11 +83,11 @@ class AgentActivityConfig:
 
 @dataclass
 class TimeSimulationConfig:
-    """Time simulation configuration (based on Chinese daily schedule habits)"""
+    """Time simulation configuration"""
     # Total simulation duration (simulated hours)
-    total_simulation_hours: int = 72  # Default: 72 hours (3 days)
+    total_simulation_hours: int = 72
 
-    # Time per round (simulated minutes) — default 60 minutes (1 hour) to accelerate time flow
+    # Time per round (simulated minutes)
     minutes_per_round: int = 60
 
     # Range of agents activated per hour
@@ -602,17 +602,18 @@ Field descriptions:
             return self._get_default_time_config(num_entities)
 
     def _get_default_time_config(self, num_entities: int) -> Dict[str, Any]:
-        """Get default time configuration (Chinese daily schedule)"""
+        """Get default time configuration using SIMULATION_MODE presets from Config"""
+        from ..config import Config
         return {
-            "total_simulation_hours": 72,
-            "minutes_per_round": 60,  # 1 hour per round to accelerate time flow
-            "agents_per_hour_min": max(1, num_entities // 15),
-            "agents_per_hour_max": max(5, num_entities // 5),
-            "peak_hours": [19, 20, 21, 22],
+            "total_simulation_hours": Config.get_sim_total_hours(),
+            "minutes_per_round": Config.get_sim_minutes_per_round(),
+            "agents_per_hour_min": min(Config.get_sim_agents_per_hour_min(), max(1, num_entities // 15)),
+            "agents_per_hour_max": min(Config.get_sim_agents_per_hour_max(), max(5, num_entities // 5)),
+            "peak_hours": [9, 10, 11, 14, 15, 20, 21, 22],
             "off_peak_hours": [0, 1, 2, 3, 4, 5],
             "morning_hours": [6, 7, 8],
             "work_hours": [9, 10, 11, 12, 13, 14, 15, 16, 17, 18],
-            "reasoning": "Using default Chinese daily schedule (1 hour per round)"
+            "reasoning": f"Using {Config.SIMULATION_MODE} simulation mode defaults"
         }
 
     def _parse_time_config(self, result: Dict[str, Any], num_entities: int) -> TimeSimulationConfig:
@@ -635,12 +636,13 @@ Field descriptions:
             agents_per_hour_min = max(1, agents_per_hour_max // 2)
             logger.warning(f"agents_per_hour_min >= max, corrected to {agents_per_hour_min}")
 
+        from ..config import Config
         return TimeSimulationConfig(
-            total_simulation_hours=result.get("total_simulation_hours", 72),
-            minutes_per_round=result.get("minutes_per_round", 60),  # Default 1 hour per round
+            total_simulation_hours=result.get("total_simulation_hours", Config.get_sim_total_hours()),
+            minutes_per_round=result.get("minutes_per_round", Config.get_sim_minutes_per_round()),
             agents_per_hour_min=agents_per_hour_min,
             agents_per_hour_max=agents_per_hour_max,
-            peak_hours=result.get("peak_hours", [19, 20, 21, 22]),
+            peak_hours=result.get("peak_hours", [9, 10, 11, 14, 15, 20, 21, 22]),
             off_peak_hours=result.get("off_peak_hours", [0, 1, 2, 3, 4, 5]),
             off_peak_activity_multiplier=0.05,  # Almost no one late night
             morning_hours=result.get("morning_hours", [6, 7, 8]),

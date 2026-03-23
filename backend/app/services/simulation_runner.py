@@ -354,16 +354,17 @@ class SimulationRunner:
 
         # Initialize run state
         time_config = config.get("time_config", {})
-        total_hours = time_config.get("total_simulation_hours", 72)
-        minutes_per_round = time_config.get("minutes_per_round", 30)
+        total_hours = time_config.get("total_simulation_hours", Config.get_sim_total_hours())
+        minutes_per_round = time_config.get("minutes_per_round", Config.get_sim_minutes_per_round())
         total_rounds = int(total_hours * 60 / minutes_per_round)
 
-        # If max_rounds is specified, cap the total
-        if max_rounds is not None and max_rounds > 0:
+        # Apply max_rounds: explicit param > Config preset > no cap
+        effective_max = max_rounds if (max_rounds is not None and max_rounds > 0) else Config.get_sim_max_rounds()
+        if effective_max > 0:
             original_rounds = total_rounds
-            total_rounds = min(total_rounds, max_rounds)
+            total_rounds = min(total_rounds, effective_max)
             if total_rounds < original_rounds:
-                logger.info(f"Rounds capped: {original_rounds} -> {total_rounds} (max_rounds={max_rounds})")
+                logger.info(f"Rounds capped: {original_rounds} -> {total_rounds} (max_rounds={effective_max})")
 
         state = SimulationRunState(
             simulation_id=simulation_id,
@@ -438,6 +439,7 @@ class SimulationRunner:
             env = os.environ.copy()
             env['PYTHONUTF8'] = '1'  # Supported by Python 3.7+; makes all open() use UTF-8 by default
             env['PYTHONIOENCODING'] = 'utf-8'  # Ensures stdout/stderr use UTF-8
+            env['SIM_OASIS_SEMAPHORE'] = str(Config.get_sim_oasis_semaphore())
 
             # Set working directory to the simulation directory (databases etc. will be generated there)
             # Use start_new_session=True to create a new process group, ensuring all child processes
