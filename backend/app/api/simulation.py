@@ -326,7 +326,7 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
                     state_data["status"] = "ready"
                     from datetime import datetime
                     state_data["updated_at"] = datetime.now().isoformat()
-                    with open(state_file, 'w', encoding='utf-8') as f:
+                    with open(state_path, 'w', encoding='utf-8') as f:
                         json.dump(state_data, f, ensure_ascii=False, indent=2)
                     logger.info(f"Auto-updated simulation status: {simulation_id} preparing -> ready")
                     status = "ready"

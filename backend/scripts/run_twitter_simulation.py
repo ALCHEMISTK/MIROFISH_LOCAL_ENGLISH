@@ -549,7 +549,7 @@ class TwitterSimulationRunner:
         # Load time config
         time_config = self.config.get("time_config", {})
         total_hours = time_config.get("total_simulation_hours", 72)
-        minutes_per_round = time_config.get("minutes_per_round", 30)
+        minutes_per_round = max(1, time_config.get("minutes_per_round", 30))
 
         # Calculate total rounds
         total_rounds = (total_hours * 60) // minutes_per_round
@@ -696,7 +696,7 @@ class TwitterSimulationRunner:
 
             # Command-waiting loop (uses global _shutdown_event)
             try:
-                while not _shutdown_event.is_set():
+                while not (_shutdown_event and _shutdown_event.is_set()):
                     should_continue = await self.ipc_handler.process_commands()
                     if not should_continue:
                         break

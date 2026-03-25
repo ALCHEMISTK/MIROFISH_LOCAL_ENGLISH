@@ -197,16 +197,31 @@ class GraphBuilderService:
 
     def set_ontology(self, graph_id: str, ontology: Dict[str, Any]):
         """
-        Save ontology as extraction hints JSON.
-        Note: LightRAG's extraction pipeline uses its own entity types internally.
-        These hints are saved for reference and used by the entity deduplication
-        and profile generation steps, but do not directly control LightRAG extraction.
+        Save ontology and reinitialize LightRAG with custom entity types.
+
+        The ontology entity type names are injected into LightRAG's extraction
+        prompt via addon_params["entity_types"], enabling schema-guided extraction.
+        The full ontology is also saved as extraction_hints.json for reference.
         """
         working_dir = get_working_dir(graph_id)
         hints_path = os.path.join(working_dir, "extraction_hints.json")
         with open(hints_path, 'w', encoding='utf-8') as f:
             json.dump(ontology, f, indent=2, ensure_ascii=False)
         logger.debug(f"Ontology hints saved to {hints_path}")
+
+        # Extract entity type names and reinitialize LightRAG with them
+        entity_type_names = [
+            et.get("name") for et in ontology.get("entity_types", [])
+            if et.get("name")
+        ]
+        if entity_type_names:
+            # Reinitialize the LightRAG instance with custom entity types
+            # so the extraction prompt uses them instead of defaults
+            get_rag(graph_id, create_if_missing=True, entity_types=entity_type_names)
+            logger.info(
+                f"LightRAG reinitialized with {len(entity_type_names)} ontology entity types: "
+                f"{', '.join(entity_type_names[:5])}{'...' if len(entity_type_names) > 5 else ''}"
+            )
 
     def _get_ontology_prefix(self, graph_id: str) -> str:
         """Build an extraction hint prefix from saved ontology."""
@@ -246,13 +261,11 @@ class GraphBuilderService:
         rag = get_rag(graph_id, create_if_missing=True)
         total_chunks = len(chunks)
         chunk_ids = []
-        ontology_prefix = self._get_ontology_prefix(graph_id)
 
         for i, chunk in enumerate(chunks):
             chunk_id = f"chunk_{i}"
-            text_to_insert = ontology_prefix + chunk if ontology_prefix else chunk
             try:
-                run_async(rag.ainsert(text_to_insert))
+                run_async(rag.ainsert(chunk))
                 chunk_ids.append(chunk_id)
             except Exception as e:
                 friendly_error = format_graph_build_error(e)

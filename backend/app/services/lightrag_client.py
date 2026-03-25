@@ -140,13 +140,18 @@ def _is_local_ollama(base_url: str) -> bool:
     return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 
-def build_lightrag_llm_binding():
+def build_lightrag_llm_binding(entity_normalization_rules: str = ""):
     """
     Select the correct LightRAG LLM binding from the app config.
 
     Always uses the OpenAI-compatible endpoint so that all fixes
     (thinking model /no_think, rate limiting, retry logic) apply uniformly
     — even for local Ollama.
+
+    Args:
+        entity_normalization_rules: Optional text block appended to the system
+            prompt during entity extraction calls. Used to instruct the LLM to
+            normalize abbreviations/aliases to canonical entity names.
     """
     try:
         from lightrag.llm.openai import openai_complete_if_cache as openai_llm_complete
@@ -176,8 +181,12 @@ def build_lightrag_llm_binding():
         **kwargs,
     ):
         history_messages = history_messages or []
-        # Disable thinking mode for qwen3 models via system prompt
+        # Inject entity normalization rules into extraction prompts
         effective_system = system_prompt
+        if entity_normalization_rules and effective_system:
+            if "entity" in (prompt or "").lower() and "extract" in (prompt or "").lower():
+                effective_system = effective_system + "\n\n" + entity_normalization_rules
+        # Disable thinking mode for qwen3 models via system prompt
         if _is_thinking_model:
             if effective_system:
                 if "/no_think" not in effective_system:
@@ -421,20 +430,69 @@ def get_working_dir(graph_id: str) -> str:
     return os.path.join(data_dir, graph_id)
 
 
-def get_rag(graph_id: str, create_if_missing: bool = True):
+def _build_normalization_rules(graph_id: str) -> str:
+    """
+    Build entity name normalization instructions from the saved ontology.
+
+    Reads extraction_hints.json and produces a text block instructing the LLM
+    to always use canonical entity names during extraction, preventing
+    duplicates like "BTC" vs "Bitcoin" from entering the graph.
+    """
+    import json
+    hints_path = os.path.join(get_working_dir(graph_id), "extraction_hints.json")
+    if not os.path.exists(hints_path):
+        return ""
+    try:
+        with open(hints_path, 'r', encoding='utf-8') as f:
+            ontology = json.load(f)
+    except Exception:
+        return ""
+
+    # Collect canonical name → aliases from ontology examples
+    rules = []
+    for et in ontology.get("entity_types", []):
+        examples = et.get("examples", [])
+        if len(examples) >= 2:
+            # First example is treated as canonical; others are aliases
+            canonical = examples[0]
+            aliases = examples[1:]
+            rules.append(f'- Use "{canonical}" instead of: {", ".join(f"{a!r}" for a in aliases)}')
+
+    if not rules:
+        return ""
+
+    return (
+        "IMPORTANT — Entity Name Normalization:\n"
+        "Always use the canonical (full, standard) name for entities. "
+        "Do NOT use abbreviations, acronyms, or alternate spellings as entity names. "
+        "Normalize to the canonical form during extraction.\n"
+        + "\n".join(rules)
+    )
+
+
+def get_rag(graph_id: str, create_if_missing: bool = True, entity_types: Optional[list] = None):
     """
     Get or create a LightRAG instance for the given graph_id.
     Thread-safe singleton per graph_id.
     Returns None if create_if_missing=False and working dir doesn't exist.
+
+    Args:
+        entity_types: Optional list of entity type names for schema-guided extraction.
+                      Injected into LightRAG's extraction prompt via addon_params.
+                      If None, LightRAG uses its built-in defaults.
     """
-    # Fast path — no lock needed for reads
-    if graph_id in _rag_instances:
+    # Fast path — no lock needed for reads (skip if entity_types provided,
+    # since caller wants a fresh instance with custom extraction config)
+    if graph_id in _rag_instances and not entity_types:
         return _rag_instances[graph_id]
 
     with _rag_lock:
         # Double-check inside lock
-        if graph_id in _rag_instances:
+        if graph_id in _rag_instances and not entity_types:
             return _rag_instances[graph_id]
+        # If entity_types provided, invalidate existing instance to apply new config
+        if entity_types and graph_id in _rag_instances:
+            _rag_instances.pop(graph_id, None)
 
         working_dir = get_working_dir(graph_id)
 
@@ -447,7 +505,10 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
             from lightrag import LightRAG
             from lightrag.utils import wrap_embedding_func_with_attrs
 
-            llm_model_func, llm_model_kwargs = build_lightrag_llm_binding()
+            normalization_rules = _build_normalization_rules(graph_id) if entity_types else ""
+            llm_model_func, llm_model_kwargs = build_lightrag_llm_binding(
+                entity_normalization_rules=normalization_rules
+            )
             use_local_ollama = _is_local_ollama(Config.LLM_BASE_URL)
 
             if use_local_ollama:
@@ -526,6 +587,12 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 }
                 logger.info("Cloud API: starting with adaptive rate limiting (max concurrency=32)")
 
+            # Build addon_params for schema-guided extraction
+            addon = {"language": "English"}
+            if entity_types:
+                addon["entity_types"] = entity_types
+                logger.info(f"Schema-guided extraction: {len(entity_types)} custom entity types")
+
             rag = LightRAG(
                 working_dir=working_dir,
                 llm_model_func=llm_model_func,
@@ -533,6 +600,7 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 llm_model_kwargs=llm_model_kwargs,
                 embedding_func=_embed,
                 max_graph_nodes=Config.LIGHTRAG_MAX_GRAPH_NODES,
+                addon_params=addon,
                 **concurrency_kwargs,
             )
 
