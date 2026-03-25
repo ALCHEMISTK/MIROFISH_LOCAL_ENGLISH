@@ -1989,9 +1989,10 @@ def get_simulation_posts(simulation_id: str):
     Returns post list (read from SQLite database)
     """
     try:
+        _validate_id(simulation_id, "simulation_id")
         platform = request.args.get('platform', 'reddit')
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        limit = min(request.args.get('limit', 50, type=int), 500)
+        offset = max(request.args.get('offset', 0, type=int), 0)
 
         sim_dir = os.path.join(
             os.path.dirname(__file__),
@@ -2013,27 +2014,25 @@ def get_simulation_posts(simulation_id: str):
             })
 
         import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        try:
-            cursor.execute("""
-                SELECT * FROM post
-                ORDER BY created_at DESC
-                LIMIT ? OFFSET ?
-            """, (limit, offset))
+            try:
+                cursor.execute("""
+                    SELECT * FROM post
+                    ORDER BY created_at DESC
+                    LIMIT ? OFFSET ?
+                """, (limit, offset))
 
-            posts = [dict(row) for row in cursor.fetchall()]
+                posts = [dict(row) for row in cursor.fetchall()]
 
-            cursor.execute("SELECT COUNT(*) FROM post")
-            total = cursor.fetchone()[0]
+                cursor.execute("SELECT COUNT(*) FROM post")
+                total = cursor.fetchone()[0]
 
-        except sqlite3.OperationalError:
-            posts = []
-            total = 0
-
-        conn.close()
+            except sqlite3.OperationalError:
+                posts = []
+                total = 0
 
         return jsonify({
             "success": True,
@@ -2065,9 +2064,10 @@ def get_simulation_comments(simulation_id: str):
         offset: Offset
     """
     try:
+        _validate_id(simulation_id, "simulation_id")
         post_id = request.args.get('post_id')
-        limit = request.args.get('limit', 50, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        limit = min(request.args.get('limit', 50, type=int), 500)
+        offset = max(request.args.get('offset', 0, type=int), 0)
 
         sim_dir = os.path.join(
             os.path.dirname(__file__),
@@ -2086,31 +2086,29 @@ def get_simulation_comments(simulation_id: str):
             })
 
         import sqlite3
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
+        with sqlite3.connect(db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-        try:
-            if post_id:
-                cursor.execute("""
-                    SELECT * FROM comment
-                    WHERE post_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """, (post_id, limit, offset))
-            else:
-                cursor.execute("""
-                    SELECT * FROM comment
-                    ORDER BY created_at DESC
-                    LIMIT ? OFFSET ?
-                """, (limit, offset))
+            try:
+                if post_id:
+                    cursor.execute("""
+                        SELECT * FROM comment
+                        WHERE post_id = ?
+                        ORDER BY created_at DESC
+                        LIMIT ? OFFSET ?
+                    """, (post_id, limit, offset))
+                else:
+                    cursor.execute("""
+                        SELECT * FROM comment
+                        ORDER BY created_at DESC
+                        LIMIT ? OFFSET ?
+                    """, (limit, offset))
 
-            comments = [dict(row) for row in cursor.fetchall()]
+                comments = [dict(row) for row in cursor.fetchall()]
 
-        except sqlite3.OperationalError:
-            comments = []
-
-        conn.close()
+            except sqlite3.OperationalError:
+                comments = []
 
         return jsonify({
             "success": True,
@@ -2734,6 +2732,7 @@ def get_simulation_log_tail(simulation_id: str):
         }
     """
     try:
+        _validate_id(simulation_id, "simulation_id")
         n_lines = min(request.args.get('lines', 80, type=int), 500)
         sim_dir = os.path.join(
             os.path.dirname(__file__),
@@ -2746,7 +2745,6 @@ def get_simulation_log_tail(simulation_id: str):
                 "success": True,
                 "data": {
                     "simulation_id": simulation_id,
-                    "log_file": log_path,
                     "total_lines": 0,
                     "lines": []
                 }
@@ -2763,7 +2761,6 @@ def get_simulation_log_tail(simulation_id: str):
             "success": True,
             "data": {
                 "simulation_id": simulation_id,
-                "log_file": log_path,
                 "total_lines": total,
                 "lines": tail
             }

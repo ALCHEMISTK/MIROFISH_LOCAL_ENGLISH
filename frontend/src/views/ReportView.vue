@@ -214,7 +214,6 @@ watch(() => route.params.reportId, (newId) => {
 
 onMounted(() => {
   addLog('ReportView initialized')
-  loadReportData()
 })
 </script>
 

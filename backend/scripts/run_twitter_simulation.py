@@ -615,10 +615,18 @@ class TwitterSimulationRunner:
                 content = post.get("content", "")
                 try:
                     agent = self.env.agent_graph.get_agent(agent_id)
-                    initial_actions[agent] = ManualAction(
+                    action = ManualAction(
                         action_type=ActionType.CREATE_POST,
                         action_args={"content": content}
                     )
+                    if agent in initial_actions:
+                        existing = initial_actions[agent]
+                        if not isinstance(existing, list):
+                            initial_actions[agent] = [existing, action]
+                        else:
+                            existing.append(action)
+                    else:
+                        initial_actions[agent] = action
                 except Exception as e:
                     print(f"  Warning: unable to create initial post for Agent {agent_id}: {e}")
 

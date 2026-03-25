@@ -299,7 +299,7 @@ onMounted(async () => {
   await checkAndStopRunningSimulation()
 
   // Load simulation data
-  loadSimulationData()
+  await loadSimulationData()
 })
 </script>
 

@@ -114,7 +114,7 @@ def _is_local_ollama(base_url: str) -> bool:
         host = (urlparse(base_url).hostname or "").lower()
     except Exception:
         host = ""
-    return host in {"localhost", "127.0.0.1", "0.0.0.0"}
+    return host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 
 def build_lightrag_llm_binding():
@@ -462,8 +462,9 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                         return np.array(
                             [d.embedding for d in resp.data], dtype=np.float32
                         )
-                    except Exception:
-                        await limiter.on_rate_limit()
+                    except Exception as e:
+                        if "429" in str(e) or "rate" in str(getattr(e, 'status_code', '')):
+                            await limiter.on_rate_limit()
                         raise
                     finally:
                         limiter.release()

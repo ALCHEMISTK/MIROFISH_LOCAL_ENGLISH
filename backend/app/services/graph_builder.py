@@ -387,6 +387,9 @@ class GraphBuilderService:
 
         # Execute heuristic merges
         rag = get_rag(graph_id, create_if_missing=False)
+        if not rag:
+            logger.warning(f"Graph {graph_id} not initialized, skipping dedup merges")
+            return
         merge_count = 0
         for canonical, aliases in heuristic_merges:
             try:

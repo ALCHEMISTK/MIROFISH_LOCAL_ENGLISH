@@ -274,9 +274,10 @@ class ZepToolsService:
         """Load and cache GraphML to avoid repeated disk reads."""
         import time as _time
         cache_ttl = 60  # seconds
+        now = _time.time()
         if graph_id in self._graph_cache:
             graph, ts = self._graph_cache[graph_id]
-            if _time.time() - ts < cache_ttl:
+            if now - ts < cache_ttl:
                 return graph
 
         graphml_path = os.path.join(get_working_dir(graph_id), "graph_chunk_entity_relation.graphml")
@@ -284,7 +285,11 @@ class ZepToolsService:
             return None
         try:
             graph = nx.read_graphml(graphml_path)
-            self._graph_cache[graph_id] = (graph, _time.time())
+            # Evict expired entries to prevent unbounded growth
+            expired = [k for k, (_, ts) in self._graph_cache.items() if now - ts >= cache_ttl]
+            for k in expired:
+                self._graph_cache.pop(k, None)
+            self._graph_cache[graph_id] = (graph, now)
             return graph
         except Exception as e:
             logger.warning(f"Could not read GraphML for {graph_id}: {e}")

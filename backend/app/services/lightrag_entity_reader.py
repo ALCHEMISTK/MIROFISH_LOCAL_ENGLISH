@@ -73,9 +73,10 @@ def _load_graph(graph_id: str):
     Results are cached for 60 seconds to avoid repeated disk reads."""
     import networkx as nx
 
+    now = _time.time()
     if graph_id in _graph_cache:
         graph, ts = _graph_cache[graph_id]
-        if _time.time() - ts < _GRAPH_CACHE_TTL:
+        if now - ts < _GRAPH_CACHE_TTL:
             return graph
 
     working_dir = get_working_dir(graph_id)
@@ -84,7 +85,11 @@ def _load_graph(graph_id: str):
         logger.warning(f"GraphML not found for graph_id={graph_id}: {graphml_path}")
         return nx.Graph()
     graph = nx.read_graphml(graphml_path)
-    _graph_cache[graph_id] = (graph, _time.time())
+    # Evict expired entries to prevent unbounded growth
+    expired = [k for k, (_, ts) in _graph_cache.items() if now - ts >= _GRAPH_CACHE_TTL]
+    for k in expired:
+        _graph_cache.pop(k, None)
+    _graph_cache[graph_id] = (graph, now)
     return graph
 
 
