@@ -447,7 +447,7 @@ class RedditSimulationRunner:
 
         # Fall back to config if .env doesn't have the value
         if not llm_model:
-            llm_model = self.config.get("llm_model", "gpt-4o-mini")
+            llm_model = self.config.get("llm_model", "qwen2.5:7b")
 
         # Set environment variables required by camel-ai
         if llm_api_key:
