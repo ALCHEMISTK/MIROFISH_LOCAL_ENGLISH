@@ -37,23 +37,42 @@ class AdaptiveRateLimiter:
         self._max = max_concurrency
         self._min = min_concurrency
         self._current = max_concurrency
-        self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._lock = asyncio.Lock()
+        # Lazily initialized in the event loop thread to avoid
+        # "attached to a different loop" errors on Python 3.10+.
+        self._semaphore = None
+        self._lock = None
         self._consecutive_success = 0
         self._success_threshold = 5  # successes before increasing
         self._cooldown_seconds = 2.0
         self._last_decrease_time = 0.0
+        # Track how many permits we've "logically removed" via on_rate_limit
+        # so on_success knows not to release extra ones.
+        self._pending_drains = 0
         import time as _t
         self._time = _t
 
+    def _ensure_primitives(self):
+        """Create asyncio primitives lazily inside the running event loop."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max)
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
     async def acquire(self):
+        self._ensure_primitives()
         await self._semaphore.acquire()
 
     def release(self):
-        self._semaphore.release()
+        if self._semaphore is not None:
+            self._semaphore.release()
 
     async def on_success(self):
+        self._ensure_primitives()
         async with self._lock:
+            # If there are pending drains, consume one instead of releasing a new permit
+            if self._pending_drains > 0:
+                self._pending_drains -= 1
+                return
             self._consecutive_success += 1
             if self._consecutive_success >= self._success_threshold and self._current < self._max:
                 self._current += 1
@@ -63,6 +82,7 @@ class AdaptiveRateLimiter:
                 logger.debug(f"Rate limiter: increased concurrency to {self._current}")
 
     async def on_rate_limit(self):
+        self._ensure_primitives()
         async with self._lock:
             self._consecutive_success = 0
             now = self._time.time()
@@ -73,12 +93,12 @@ class AdaptiveRateLimiter:
 
             old = self._current
             self._current = max(self._min, self._current // 2)
-            # Drain excess permits by acquiring without releasing
-            for _ in range(old - self._current):
-                try:
-                    self._semaphore.acquire_nowait()
-                except Exception:
-                    break
+            permits_to_drain = old - self._current
+
+            # Instead of trying to acquire_nowait (which fails for in-flight permits),
+            # record the number of permits to drain. These will be consumed as
+            # in-flight requests complete and call on_success().
+            self._pending_drains += permits_to_drain
 
             # Increase cooldown when we're already at minimum
             if self._current == self._min:
@@ -99,12 +119,15 @@ class AdaptiveRateLimiter:
 
 # Shared rate limiter for cloud API calls (LLM + embeddings)
 _cloud_rate_limiter: Optional[AdaptiveRateLimiter] = None
+_rate_limiter_lock = threading.Lock()
 
 
 def _get_rate_limiter() -> AdaptiveRateLimiter:
     global _cloud_rate_limiter
     if _cloud_rate_limiter is None:
-        _cloud_rate_limiter = AdaptiveRateLimiter(max_concurrency=32, min_concurrency=1)
+        with _rate_limiter_lock:
+            if _cloud_rate_limiter is None:
+                _cloud_rate_limiter = AdaptiveRateLimiter(max_concurrency=32, min_concurrency=1)
     return _cloud_rate_limiter
 
 
@@ -216,10 +239,21 @@ class _LoopThread:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(target=self._run, daemon=True, name='lightrag-loop')
         self._thread.start()
+        # Register graceful shutdown to avoid corrupting LightRAG storage
+        import atexit
+        atexit.register(self._shutdown)
 
     def _run(self):
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
+
+    def _shutdown(self):
+        """Gracefully stop the event loop so in-flight writes can complete."""
+        try:
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=5)
+        except Exception:
+            pass
 
     def run(self, coro, timeout: Optional[float] = None):
         """Submit *coro* to the loop and block the calling thread until done."""
@@ -446,18 +480,19 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 embed_dim = _detect_embedding_dim_openai(embed_model, api_key, base_url)
                 logger.info(f"Embedding: OpenAI-compatible API | model={embed_model}, dim={embed_dim}")
 
+                from openai import AsyncOpenAI
+                _cloud_embed_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
                 @wrap_embedding_func_with_attrs(
                     embedding_dim=embed_dim,
                     max_token_size=8192,
                 )
                 async def _embed(texts, **_kwargs):
                     import numpy as np
-                    from openai import AsyncOpenAI
                     limiter = _get_rate_limiter()
                     await limiter.acquire()
                     try:
-                        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
-                        resp = await client.embeddings.create(model=embed_model, input=texts)
+                        resp = await _cloud_embed_client.embeddings.create(model=embed_model, input=texts)
                         await limiter.on_success()
                         return np.array(
                             [d.embedding for d in resp.data], dtype=np.float32
@@ -497,22 +532,16 @@ def get_rag(graph_id: str, create_if_missing: bool = True):
                 **concurrency_kwargs,
             )
 
-            # Store early so other threads won't create a duplicate instance
+            # initialize_storages() must run in the persistent loop (same loop that
+            # will be used for all subsequent ainsert/aquery calls).
+            # Keep inside the lock so a second thread cannot create a duplicate instance.
+            run_async(rag.initialize_storages())
             _rag_instances[graph_id] = rag
+            logger.info(f"Initialized LightRAG: graph_id={graph_id}, dir={working_dir}")
 
         except ImportError as e:
             logger.error(f"LightRAG not installed: {e}. Run: pip install lightrag-hku")
             raise
-
-    # initialize_storages() must run in the persistent loop (same loop that
-    # will be used for all subsequent ainsert/aquery calls).
-    try:
-        run_async(rag.initialize_storages())
-        logger.info(f"Initialized LightRAG: graph_id={graph_id}, dir={working_dir}")
-    except Exception as e:
-        with _rag_lock:
-            _rag_instances.pop(graph_id, None)
-        raise
 
     return rag
 

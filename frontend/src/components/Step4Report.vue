@@ -1868,9 +1868,14 @@ const truncateText = (text, maxLen) => {
 
 const renderMarkdown = (content) => {
   if (!content) return ''
-  
+
+  // Sanitize raw HTML to prevent XSS before markdown processing
+  let processedContent = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
   // Strip leading level-2 headings (## xxx) since section titles are already shown in the outer layer
-  let processedContent = content.replace(/^##\s+.+\n+/, '')
+  processedContent = processedContent.replace(/^##\s+.+\n+/, '')
   
   // Handle code blocks
   let html = processedContent.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
@@ -2043,8 +2048,9 @@ const fetchAgentLog = async () => {
               generatedSections.value[log.section_index] = log.details.content
               // Auto-expand the just-generated section
               expandedContent.value.add(log.section_index - 1)
-              currentSectionIndex.value = null
             }
+            // Always clear loading state when section completes, even if content is empty
+            currentSectionIndex.value = null
           }
           
           if (log.action === 'report_complete') {

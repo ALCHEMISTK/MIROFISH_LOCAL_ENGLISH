@@ -67,7 +67,11 @@ def validate_config():
         )
         results['llm'] = True
     except Exception as e:
-        results['errors'].append(f"LLM validation failed: {str(e)}")
+        error_msg = str(e)
+        # Sanitize: don't expose internal URLs or keys
+        if 'api_key' in error_msg.lower() or 'apikey' in error_msg.lower() or 'api-key' in error_msg.lower():
+            error_msg = "LLM validation failed: authentication error"
+        results['errors'].append(f"LLM validation failed: {error_msg}")
 
     results['valid'] = results['llm']
     return jsonify(results)

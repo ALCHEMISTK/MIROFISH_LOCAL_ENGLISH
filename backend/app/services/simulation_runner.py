@@ -238,7 +238,8 @@ class SimulationRunner:
         # Try to load from file
         state = cls._load_run_state(simulation_id)
         if state:
-            cls._run_states[simulation_id] = state
+            with cls._lock:
+                cls._run_states[simulation_id] = state
         return state
 
     @classmethod
@@ -383,13 +384,16 @@ class SimulationRunner:
 
             try:
                 ZepGraphMemoryManager.create_updater(simulation_id, graph_id)
-                cls._graph_memory_enabled[simulation_id] = True
+                with cls._lock:
+                    cls._graph_memory_enabled[simulation_id] = True
                 logger.info(f"Graph memory update enabled: simulation_id={simulation_id}, graph_id={graph_id}")
             except Exception as e:
                 logger.error(f"Failed to create graph memory updater: {e}")
-                cls._graph_memory_enabled[simulation_id] = False
+                with cls._lock:
+                    cls._graph_memory_enabled[simulation_id] = False
         else:
-            cls._graph_memory_enabled[simulation_id] = False
+            with cls._lock:
+                cls._graph_memory_enabled[simulation_id] = False
 
         # Determine which script to run (scripts located in backend/scripts/ directory)
         if platform == "twitter":
@@ -410,7 +414,8 @@ class SimulationRunner:
 
         # Create action queue
         action_queue = Queue()
-        cls._action_queues[simulation_id] = action_queue
+        with cls._lock:
+            cls._action_queues[simulation_id] = action_queue
 
         # Start simulation process
         try:
@@ -444,25 +449,30 @@ class SimulationRunner:
             # Set working directory to the simulation directory (databases etc. will be generated there)
             # Use start_new_session=True to create a new process group, ensuring all child processes
             # can be terminated via os.killpg when needed
-            process = subprocess.Popen(
-                cmd,
-                cwd=sim_dir,
-                stdout=main_log_file,
-                stderr=subprocess.STDOUT,  # stderr also written to the same file
-                text=True,
-                encoding='utf-8',  # Explicitly specify encoding
-                bufsize=1,
-                env=env,  # Pass environment variables with UTF-8 settings
-                start_new_session=True,  # Create new process group; ensures all related processes are terminated when server shuts down
-            )
+            try:
+                process = subprocess.Popen(
+                    cmd,
+                    cwd=sim_dir,
+                    stdout=main_log_file,
+                    stderr=subprocess.STDOUT,  # stderr also written to the same file
+                    text=True,
+                    encoding='utf-8',  # Explicitly specify encoding
+                    bufsize=1,
+                    env=env,  # Pass environment variables with UTF-8 settings
+                    start_new_session=True,  # Create new process group; ensures all related processes are terminated when server shuts down
+                )
+            except Exception:
+                main_log_file.close()
+                raise
 
-            # Save file handles for later closing
-            cls._stdout_files[simulation_id] = main_log_file
-            cls._stderr_files[simulation_id] = None  # No separate stderr needed
+            # Save file handles and process references (thread-safe)
+            with cls._lock:
+                cls._stdout_files[simulation_id] = main_log_file
+                cls._stderr_files[simulation_id] = None  # No separate stderr needed
+                cls._processes[simulation_id] = process
 
             state.process_pid = process.pid
             state.runner_status = RunnerStatus.RUNNING
-            cls._processes[simulation_id] = process
             cls._save_run_state(state)
 
             # Start monitor thread
@@ -472,7 +482,8 @@ class SimulationRunner:
                 daemon=True
             )
             monitor_thread.start()
-            cls._monitor_threads[simulation_id] = monitor_thread
+            with cls._lock:
+                cls._monitor_threads[simulation_id] = monitor_thread
 
             logger.info(f"Simulation started successfully: {simulation_id}, pid={process.pid}, platform={platform}")
 
@@ -551,6 +562,20 @@ class SimulationRunner:
             state.reddit_running = False
             cls._save_run_state(state)
 
+            # Sync SimulationManager state
+            try:
+                from ..services.simulation_manager import SimulationManager, SimulationStatus
+                sm = SimulationManager()
+                sim_state = sm.get_simulation(simulation_id)
+                if sim_state:
+                    if state.runner_status == RunnerStatus.COMPLETED:
+                        sim_state.status = SimulationStatus.COMPLETED
+                    elif state.runner_status == RunnerStatus.FAILED:
+                        sim_state.status = SimulationStatus.FAILED
+                    sm._save_simulation_state(sim_state)
+            except Exception as e:
+                logger.warning(f"Failed to sync SimulationManager state: {e}")
+
         except Exception as e:
             logger.error(f"Monitor thread error: {simulation_id}, error={str(e)}")
             state.runner_status = RunnerStatus.FAILED
@@ -570,6 +595,7 @@ class SimulationRunner:
             # Clean up process resources
             cls._processes.pop(simulation_id, None)
             cls._action_queues.pop(simulation_id, None)
+            cls._monitor_threads.pop(simulation_id, None)
 
             # Close log file handles
             if simulation_id in cls._stdout_files:
@@ -696,24 +722,15 @@ class SimulationRunner:
             return position
 
     @classmethod
-    def _check_all_platforms_completed(cls, state: SimulationRunState) -> bool:
-        """
-        Check whether all enabled platforms have completed simulation.
-
-        Uses the running flags set at start time (not file existence, which
-        can race if a platform is slow to create its log file).
-
-        Returns:
-            True if all running platforms have completed
-        """
-        # If a platform was started but not completed, return False
+    def _check_all_platforms_completed(cls, state) -> bool:
+        """Check if all enabled platforms have completed."""
+        # If a platform is running but hasn't completed, we're not done
         if state.twitter_running and not state.twitter_completed:
             return False
         if state.reddit_running and not state.reddit_completed:
             return False
-
-        # At least one platform was running and has completed
-        return state.twitter_running or state.reddit_running
+        # At least one platform must have been enabled and completed
+        return state.twitter_completed or state.reddit_completed
 
     @classmethod
     def _terminate_process(cls, process: subprocess.Popen, simulation_id: str, timeout: int = 10):
@@ -785,7 +802,8 @@ class SimulationRunner:
         cls._save_run_state(state)
 
         # Terminate process
-        process = cls._processes.get(simulation_id)
+        with cls._lock:
+            process = cls._processes.get(simulation_id)
         if process and process.poll() is None:
             try:
                 cls._terminate_process(process, simulation_id)
@@ -808,13 +826,16 @@ class SimulationRunner:
         cls._save_run_state(state)
 
         # Stop graph memory updater
-        if cls._graph_memory_enabled.get(simulation_id, False):
+        with cls._lock:
+            graph_memory_enabled = cls._graph_memory_enabled.get(simulation_id, False)
+        if graph_memory_enabled:
             try:
                 ZepGraphMemoryManager.stop_updater(simulation_id)
                 logger.info(f"Graph memory update stopped: simulation_id={simulation_id}")
             except Exception as e:
                 logger.error(f"Failed to stop graph memory updater: {e}")
-            cls._graph_memory_enabled.pop(simulation_id, None)
+            with cls._lock:
+                cls._graph_memory_enabled.pop(simulation_id, None)
 
         logger.info(f"Simulation stopped: {simulation_id}")
         return state
@@ -1001,7 +1022,7 @@ class SimulationRunner:
         Returns:
             Summary info per round
         """
-        actions = cls.get_actions(simulation_id, limit=10000)
+        actions = cls.get_all_actions(simulation_id)
 
         # Group by round
         rounds: Dict[int, Dict[str, Any]] = {}
@@ -1062,7 +1083,7 @@ class SimulationRunner:
         Returns:
             Agent statistics list
         """
-        actions = cls.get_actions(simulation_id, limit=10000)
+        actions = cls.get_all_actions(simulation_id)
 
         agent_stats: Dict[int, Dict[str, Any]] = {}
 
@@ -1167,8 +1188,8 @@ class SimulationRunner:
                         errors.append(f"Failed to delete {dir_name}/actions.jsonl: {str(e)}")
 
         # Clean in-memory run state
-        if simulation_id in cls._run_states:
-            del cls._run_states[simulation_id]
+        with cls._lock:
+            cls._run_states.pop(simulation_id, None)
 
         logger.info(f"Simulation log cleanup complete: {simulation_id}, deleted files: {cleaned_files}")
 

@@ -98,7 +98,7 @@ def setup_oasis_logging(log_dir: str):
 
     loggers_config = {
         "social.agent": os.path.join(log_dir, "social.agent.log"),
-        "social.twitter": os.path.join(log_dir, "social.twitter.log"),
+        "social.reddit": os.path.join(log_dir, "social.reddit.log"),
         "social.rec": os.path.join(log_dir, "social.rec.log"),
         "oasis.env": os.path.join(log_dir, "oasis.env.log"),
         "table": os.path.join(log_dir, "table.log"),
@@ -185,7 +185,14 @@ class IPCHandler:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except (json.JSONDecodeError, OSError):
+            except json.JSONDecodeError as e:
+                print(f"Warning: Corrupt command file {filepath}, removing: {e}")
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                continue
+            except OSError:
                 continue
 
         return None
@@ -282,7 +289,7 @@ class IPCHandler:
             results = {}
             for agent_id in agent_prompts.keys():
                 result = self._get_interview_result(agent_id)
-                results[agent_id] = result
+                results[str(agent_id)] = result
 
             self.send_response(command_id, "completed", result={
                 "interviews_count": len(results),
@@ -311,29 +318,27 @@ class IPCHandler:
             return result
 
         try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
 
-            # Query the latest interview record
-            cursor.execute("""
-                SELECT user_id, info, created_at
-                FROM trace
-                WHERE action = ? AND user_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (ActionType.INTERVIEW.value, agent_id))
+                # Query the latest interview record
+                cursor.execute("""
+                    SELECT user_id, info, created_at
+                    FROM trace
+                    WHERE action = ? AND user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (ActionType.INTERVIEW.value, agent_id))
 
-            row = cursor.fetchone()
-            if row:
-                user_id, info_json, created_at = row
-                try:
-                    info = json.loads(info_json) if info_json else {}
-                    result["response"] = info.get("response", info)
-                    result["timestamp"] = created_at
-                except json.JSONDecodeError:
-                    result["response"] = info_json
-
-            conn.close()
+                row = cursor.fetchone()
+                if row:
+                    user_id, info_json, created_at = row
+                    try:
+                        info = json.loads(info_json) if info_json else {}
+                        result["response"] = info.get("response", info)
+                        result["timestamp"] = created_at
+                    except json.JSONDecodeError:
+                        result["response"] = info_json
 
         except Exception as e:
             print(f"  Failed to read interview result: {e}")
@@ -624,6 +629,11 @@ class RedditSimulationRunner:
         start_time = datetime.now()
 
         for round_num in range(total_rounds):
+            # Check for shutdown signal
+            if _shutdown_event and _shutdown_event.is_set():
+                print(f"\nShutdown requested, stopping at round {round_num}/{total_rounds}")
+                break
+
             simulated_minutes = round_num * minutes_per_round
             simulated_hour = (simulated_minutes // 60) % 24
             simulated_day = simulated_minutes // (60 * 24) + 1
@@ -684,9 +694,14 @@ class RedditSimulationRunner:
 
             print("\nShutting down environment...")
 
-        # Close environment
-        self.ipc_handler.update_status("stopped")
-        await self.env.close()
+        # Close environment (always, even if an exception occurred above)
+        try:
+            self.ipc_handler.update_status("stopped")
+        except Exception:
+            pass
+        finally:
+            if self.env:
+                await self.env.close()
 
         print("Environment closed")
         print("=" * 60)
@@ -731,7 +746,18 @@ async def main():
         config_path=args.config,
         wait_for_commands=not args.no_wait
     )
-    await runner.run(max_rounds=args.max_rounds)
+    try:
+        await runner.run(max_rounds=args.max_rounds)
+    except Exception as e:
+        print(f"\nSimulation failed with error: {e}")
+    finally:
+        # Ensure OASIS environment is always closed to prevent resource leaks
+        if hasattr(runner, 'env') and runner.env:
+            try:
+                await runner.env.close()
+                print("Environment closed (cleanup)")
+            except Exception:
+                pass
 
 
 def setup_signal_handlers():

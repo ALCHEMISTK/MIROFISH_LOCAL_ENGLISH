@@ -84,7 +84,7 @@
             </div>
             <div class="profiles-list">
               <div 
-                v-for="(profile, idx) in profiles" 
+                v-for="(profile, idx) in displayProfiles" 
                 :key="idx" 
                 class="profile-card"
                 @click="selectProfile(profile)"
@@ -755,6 +755,7 @@ const handleStartSimulation = () => {
 }
 
 const truncateBio = (bio) => {
+  if (!bio) return ''
   if (bio.length > 80) {
     return bio.substring(0, 80) + '...'
   }
@@ -1007,7 +1008,8 @@ const fetchConfigRealtime = async () => {
         }
 
         stopConfigPolling()
-        phase.value = 4
+        phase.value = 3 // Briefly show "Orchestrating" phase
+        setTimeout(() => { phase.value = 4 }, 500)
         addLog('✓ Environment setup complete, ready to start simulation')
         emit('update-status', 'completed')
       }
@@ -1041,8 +1043,8 @@ const loadPreparedData = async () => {
         }
 
         addLog('✓ Environment setup complete, ready to start simulation')
-        phase.value = 4
-        emit('update-status', 'completed')
+        phase.value = 3 // Briefly show "Orchestrating" phase
+        setTimeout(() => { phase.value = 4; emit('update-status', 'completed') }, 500)
       } else {
         // Config not yet generated, start polling
         addLog('Config still generating, polling for completion...')

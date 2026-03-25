@@ -15,6 +15,7 @@ from ..services.graph_builder import GraphBuilderService, format_graph_build_err
 from ..services.text_processor import TextProcessor
 from ..utils.file_parser import FileParser
 from ..utils.logger import get_logger
+from ..utils.id_validator import validate_id
 from ..models.task import TaskManager, TaskStatus
 from ..models.project import ProjectManager, ProjectStatus
 
@@ -37,18 +38,17 @@ def get_project(project_id: str):
     """
     Get project details
     """
-    project = ProjectManager.get_project(project_id)
-
-    if not project:
-        return jsonify({
-            "success": False,
-            "error": f"Project not found: {project_id}"
-        }), 404
-
-    return jsonify({
-        "success": True,
-        "data": project.to_dict()
-    })
+    try:
+        validate_id(project_id, "project_id")
+        project = ProjectManager.get_project(project_id)
+        if not project:
+            return jsonify({"success": False, "error": f"Project not found: {project_id}"}), 404
+        return jsonify({"success": True, "data": project.to_dict()})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Failed to get project: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @graph_bp.route('/project/list', methods=['GET'])
@@ -56,14 +56,18 @@ def list_projects():
     """
     List all projects
     """
-    limit = request.args.get('limit', 50, type=int)
-    projects = ProjectManager.list_projects(limit=limit)
+    try:
+        limit = request.args.get('limit', 50, type=int)
+        projects = ProjectManager.list_projects(limit=limit)
 
-    return jsonify({
-        "success": True,
-        "data": [p.to_dict() for p in projects],
-        "count": len(projects)
-    })
+        return jsonify({
+            "success": True,
+            "data": [p.to_dict() for p in projects],
+            "count": len(projects)
+        })
+    except Exception as e:
+        logger.error(f"Failed to list projects: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @graph_bp.route('/project/<project_id>', methods=['DELETE'])
@@ -71,18 +75,17 @@ def delete_project(project_id: str):
     """
     Delete a project
     """
-    success = ProjectManager.delete_project(project_id)
-
-    if not success:
-        return jsonify({
-            "success": False,
-            "error": f"Project not found or deletion failed: {project_id}"
-        }), 404
-
-    return jsonify({
-        "success": True,
-        "message": f"Project deleted: {project_id}"
-    })
+    try:
+        validate_id(project_id, "project_id")
+        success = ProjectManager.delete_project(project_id)
+        if not success:
+            return jsonify({"success": False, "error": f"Project not found or deletion failed: {project_id}"}), 404
+        return jsonify({"success": True, "message": f"Project deleted: {project_id}"})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Failed to delete project: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @graph_bp.route('/project/<project_id>/reset', methods=['POST'])
@@ -90,30 +93,38 @@ def reset_project(project_id: str):
     """
     Reset project status (for rebuilding graph)
     """
-    project = ProjectManager.get_project(project_id)
+    try:
+        validate_id(project_id, "project_id")
+        project = ProjectManager.get_project(project_id)
 
-    if not project:
+        if not project:
+            return jsonify({
+                "success": False,
+                "error": f"Project not found: {project_id}"
+            }), 404
+
+        # Reset to ontology generated status
+        if project.ontology:
+            project.status = ProjectStatus.ONTOLOGY_GENERATED
+        else:
+            project.status = ProjectStatus.CREATED
+
+        project.graph_id = None
+        project.graph_build_task_id = None
+        project.error = None
+        ProjectManager.save_project(project)
+
         return jsonify({
-            "success": False,
-            "error": f"Project not found: {project_id}"
-        }), 404
+            "success": True,
+            "message": f"Project reset: {project_id}",
+            "data": project.to_dict()
+        })
 
-    # Reset to ontology generated status
-    if project.ontology:
-        project.status = ProjectStatus.ONTOLOGY_GENERATED
-    else:
-        project.status = ProjectStatus.CREATED
-
-    project.graph_id = None
-    project.graph_build_task_id = None
-    project.error = None
-    ProjectManager.save_project(project)
-
-    return jsonify({
-        "success": True,
-        "message": f"Project reset: {project_id}",
-        "data": project.to_dict()
-    })
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Failed to reset project: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ============== API 1: Upload Files and Generate Ontology ==============
@@ -197,7 +208,7 @@ def generate_ontology():
                 text = FileParser.extract_text(file_info["path"])
                 text = TextProcessor.preprocess_text(text)
                 document_texts.append(text)
-                all_text += f"\n\n=== {file_info['original_filename']} ===\n{text}"
+                all_text += f"\n\n{text}"
 
         if not document_texts:
             ProjectManager.delete_project(project.project_id)
@@ -249,8 +260,7 @@ def generate_ontology():
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -292,6 +302,8 @@ def build_graph():
                 "success": False,
                 "error": "Please provide project_id"
             }), 400
+
+        validate_id(project_id, "project_id")
 
         # Get project
         project = ProjectManager.get_project(project_id)
@@ -359,9 +371,21 @@ def build_graph():
         project.graph_build_task_id = task_id
         ProjectManager.save_project(project)
 
-        # Start background task
+        # Start background task — reload project from storage inside the thread
+        # to avoid sharing a mutable object across threads (race condition).
+        _build_project_id = project_id
+
         def build_task():
             build_logger = get_logger('mirofish.build')
+            project = ProjectManager.get_project(_build_project_id)
+            if not project:
+                task_manager.update_task(
+                    task_id,
+                    status=TaskStatus.FAILED,
+                    message="Project not found during build",
+                    error="Project not found"
+                )
+                return
             try:
                 build_logger.info(f"[{task_id}] Starting graph building...")
                 task_manager.update_task(
@@ -429,6 +453,19 @@ def build_graph():
                     progress_callback=add_progress_callback
                 )
 
+                # Entity deduplication (optional, depends on LightRAG API)
+                task_manager.update_task(
+                    task_id,
+                    message="Deduplicating entities...",
+                    progress=91
+                )
+                try:
+                    builder._dedup_entities(graph_id)
+                except AttributeError:
+                    build_logger.info("LightRAG amerge_entities not available, skipping dedup")
+                except Exception as e:
+                    build_logger.warning(f"Entity deduplication failed (non-fatal): {e}")
+
                 # Get graph data
                 task_manager.update_task(
                     task_id,
@@ -475,7 +512,7 @@ def build_graph():
                     task_id,
                     status=TaskStatus.FAILED,
                     message=f"Build failed: {friendly_error}",
-                    error=traceback.format_exc()
+                    error=friendly_error
                 )
 
         # Start background thread
@@ -491,11 +528,12 @@ def build_graph():
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -506,18 +544,26 @@ def get_task(task_id: str):
     """
     Query task status
     """
-    task = TaskManager().get_task(task_id)
+    try:
+        validate_id(task_id, "task_id")
+        task = TaskManager().get_task(task_id)
 
-    if not task:
+        if not task:
+            return jsonify({
+                "success": False,
+                "error": f"Task not found: {task_id}"
+            }), 404
+
         return jsonify({
-            "success": False,
-            "error": f"Task not found: {task_id}"
-        }), 404
+            "success": True,
+            "data": task.to_dict()
+        })
 
-    return jsonify({
-        "success": True,
-        "data": task.to_dict()
-    })
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except Exception as e:
+        logger.error(f"Failed to get task: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 @graph_bp.route('/tasks', methods=['GET'])
@@ -525,13 +571,17 @@ def list_tasks():
     """
     List all tasks
     """
-    tasks = TaskManager().list_tasks()
+    try:
+        tasks = TaskManager().list_tasks()
 
-    return jsonify({
-        "success": True,
-        "data": [t.to_dict() for t in tasks],
-        "count": len(tasks)
-    })
+        return jsonify({
+            "success": True,
+            "data": [t.to_dict() for t in tasks],
+            "count": len(tasks)
+        })
+    except Exception as e:
+        logger.error(f"Failed to list tasks: {str(e)}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ============== Graph Data API ==============
@@ -542,6 +592,7 @@ def get_graph_data(graph_id: str):
     Get graph data (nodes and edges)
     """
     try:
+        validate_id(graph_id, "graph_id")
         builder = GraphBuilderService()
         graph_data = builder.get_graph_data(graph_id)
 
@@ -550,11 +601,12 @@ def get_graph_data(graph_id: str):
             "data": graph_data
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -564,6 +616,7 @@ def delete_graph(graph_id: str):
     Delete Zep graph
     """
     try:
+        validate_id(graph_id, "graph_id")
         builder = GraphBuilderService()
         builder.delete_graph(graph_id)
 
@@ -572,9 +625,10 @@ def delete_graph(graph_id: str):
             "message": f"Graph deleted: {graph_id}"
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500

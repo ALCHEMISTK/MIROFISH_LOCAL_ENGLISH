@@ -229,12 +229,9 @@ class SimulationConfigGenerator:
         base_url: Optional[str] = None,
         model_name: Optional[str] = None
     ):
-        self.api_key = api_key or Config.LLM_API_KEY
+        self.api_key = api_key or Config.LLM_API_KEY or "ollama"
         self.base_url = base_url or Config.LLM_BASE_URL
         self.model_name = model_name or Config.LLM_MODEL_NAME
-
-        if not self.api_key:
-            raise ValueError("LLM_API_KEY is not configured")
 
         self.client = OpenAI(
             api_key=self.api_key,
@@ -432,6 +429,12 @@ class SimulationConfigGenerator:
 
         return "\n".join(lines)
 
+    @property
+    def _is_thinking_model(self) -> bool:
+        """Detect models that use thinking mode (qwen3, qwq, etc.)."""
+        m = self.model_name.lower()
+        return 'qwen3' in m or 'qwq' in m
+
     def _call_llm_with_retry(self, prompt: str, system_prompt: str) -> Dict[str, Any]:
         """LLM call with retry logic and JSON repair"""
         import re
@@ -439,17 +442,27 @@ class SimulationConfigGenerator:
         max_attempts = 3
         last_error = None
 
+        # Inject /no_think for thinking models
+        effective_system = system_prompt
+        if self._is_thinking_model:
+            if "/no_think" not in effective_system:
+                effective_system = effective_system + "\n/no_think"
+
         for attempt in range(max_attempts):
             try:
                 kwargs = dict(
                     model=self.model_name,
                     messages=[
-                        {"role": "system", "content": system_prompt},
+                        {"role": "system", "content": effective_system},
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
                     max_tokens=2048,
                 )
+                # For thinking models on local Ollama, set num_predict
+                if self._is_thinking_model and 'localhost' in str(getattr(self.client, '_base_url', '') or ''):
+                    kwargs["extra_body"] = {"options": {"num_predict": 2048}}
+
                 # response_format not supported by all providers; try with, fall back without
                 try:
                     response = self.client.chat.completions.create(
@@ -458,7 +471,11 @@ class SimulationConfigGenerator:
                 except Exception:
                     response = self.client.chat.completions.create(**kwargs)
 
-                content = response.choices[0].message.content
+                content = response.choices[0].message.content or ""
+
+                # Strip thinking blocks from response
+                content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
                 finish_reason = response.choices[0].finish_reason
 
                 # Check if truncated
@@ -483,27 +500,29 @@ class SimulationConfigGenerator:
                 logger.warning(f"LLM call failed (attempt {attempt+1}): {str(e)[:80]}")
                 last_error = e
                 import time
-                time.sleep(2 * (attempt + 1))
+                error_str = str(e).lower()
+                # Detect quota/rate-limit errors and wait longer
+                is_rate_limit = any(marker in error_str for marker in [
+                    "429", "rate", "quota", "limit", "too many requests",
+                    "usage limit", "capacity", "overloaded"
+                ])
+                if is_rate_limit:
+                    wait_time = 30 * (attempt + 1)
+                    logger.warning(f"Rate limited, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    time.sleep(2 * (attempt + 1))
 
         raise last_error or Exception("LLM call failed")
 
     def _fix_truncated_json(self, content: str) -> str:
-        """Fix truncated JSON"""
-        content = content.strip()
-
-        # Count unclosed brackets
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
-
-        # Check for unclosed strings
-        if content and content[-1] not in '",}]':
-            content += '"'
-
-        # Close brackets
-        content += ']' * open_brackets
-        content += '}' * open_braces
-
-        return content
+        """Fix truncated JSON using json_repair for robust bracket/string handling"""
+        from json_repair import repair_json
+        try:
+            return repair_json(content, return_objects=False)
+        except Exception:
+            # Fallback: return as-is and let the caller handle parse errors
+            return content.strip()
 
     def _try_fix_config_json(self, content: str) -> Optional[Dict[str, Any]]:
         """Try to repair config JSON"""
@@ -528,13 +547,13 @@ class SimulationConfigGenerator:
 
             try:
                 return json.loads(json_str)
-            except:
+            except Exception:
                 # Try removing all control characters
                 json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
                 json_str = re.sub(r'\s+', ' ', json_str)
                 try:
                     return json.loads(json_str)
-                except:
+                except Exception:
                     pass
 
         return None

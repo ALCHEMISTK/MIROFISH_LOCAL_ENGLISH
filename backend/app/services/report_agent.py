@@ -352,6 +352,22 @@ class ReportConsoleLogger:
         )
         self._file_handler.setFormatter(formatter)
 
+        # Use a thread-based filter to avoid cross-report log contamination
+        # when multiple reports are generated concurrently.  Each report runs
+        # in its own background thread, so filtering by thread ID is reliable.
+        import threading as _threading
+        self._owner_thread_id = _threading.current_thread().ident
+
+        class _ThreadFilter(logging.Filter):
+            def __init__(self, tid):
+                super().__init__()
+                self._tid = tid
+            def filter(self, record):
+                return record.thread == self._tid
+
+        self._report_filter = _ThreadFilter(self._owner_thread_id)
+        self._file_handler.addFilter(self._report_filter)
+
         # Attach to report_agent-related loggers
         loggers_to_attach = [
             'mirofish.report_agent',
@@ -527,31 +543,29 @@ A lightweight fast retrieval tool, suitable for simple, direct information queri
 - A list of facts most relevant to the query"""
 
 TOOL_DESC_INTERVIEW_AGENTS = """\
-[Deep Interview - Real Agent Interview (dual platform)]
-Calls the OASIS simulation environment's interview API to conduct real interviews with running simulation agents!
-This is not LLM simulation — it calls the real interview interface to get raw answers from simulation agents.
-By default interviews are conducted on both Twitter and Reddit platforms simultaneously for broader perspectives.
+[Perspective Analysis - Entity Viewpoint Synthesis]
+Queries the knowledge graph from the perspective of key simulation entities to synthesize
+how different actors would respond to a given topic based on their known attributes,
+relationships, and roles in the simulation.
 
 Workflow:
-1. Automatically reads persona files to understand all simulation agents
-2. Intelligently selects agents most relevant to the interview topic (e.g. students, media, officials)
-3. Automatically generates interview questions
-4. Calls /api/simulation/interview/batch to conduct real interviews on both platforms
-5. Integrates all interview results and provides multi-perspective analysis
+1. Reads entities from the knowledge graph
+2. Selects entities most relevant to the interview topic
+3. Queries the graph from each entity's perspective
+4. Synthesizes perspective-based responses grounded in graph data
 
 [Use cases]
-- Need to understand event opinions from different role perspectives (what do students think? what does the media say? what is the official position?)
-- Need to collect opinions and positions from multiple parties
-- Need to get real answers from simulation agents (from the OASIS simulation environment)
-- Want to make the report more vivid with "interview transcripts"
+- Need to understand how different entity types (students, officials, media) would view an event
+- Need perspective-based analysis from multiple stakeholders
+- Want to add multi-perspective viewpoints to the report
 
 [Returns]
-- Identity information of interviewed agents
-- Interview answers from each agent on both Twitter and Reddit platforms
-- Key quotes (can be quoted directly)
-- Interview summary and opinion comparison
+- Identity information of selected entities
+- Synthesized perspective responses for each entity
+- Key viewpoints that can be referenced in the report
+- Summary comparing different perspectives
 
-[Important] The OASIS simulation environment must be running to use this feature!"""
+[Note] Responses are synthesized from knowledge graph data, not from live simulation agents."""
 
 # ── Outline planning prompt ──
 
@@ -1762,6 +1776,14 @@ class ReportAgent:
             created_at=datetime.now().isoformat()
         )
 
+        # Check that graph has data
+        tools = ZepToolsService()
+        stats = tools.get_graph_statistics(self.graph_id)
+        if stats.get("total_nodes", 0) == 0:
+            report.status = ReportStatus.FAILED
+            report.error = "Knowledge graph is empty. Please ensure graph building completed successfully before generating a report."
+            return report
+
         # List of completed section titles (for progress tracking)
         completed_section_titles = []
 
@@ -2618,7 +2640,7 @@ class ReportManager:
         for line in processed_lines:
             if line.strip() == '':
                 empty_count += 1
-                if empty_count <= 2:
+                if empty_count < 2:
                     result_lines.append(line)
             else:
                 empty_count = 0

@@ -184,19 +184,15 @@ class OasisProfileGenerator:
         zep_api_key: Optional[str] = None,
         graph_id: Optional[str] = None
     ):
-        self.api_key = api_key or Config.LLM_API_KEY
+        self.api_key = api_key or Config.LLM_API_KEY or "ollama"
         self.base_url = base_url or Config.LLM_BASE_URL
         self.model_name = model_name or Config.LLM_MODEL_NAME
-
-        if not self.api_key:
-            raise ValueError("LLM_API_KEY is not configured")
 
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url
         )
 
-        self.zep_client = None  # kept for API compatibility; context enrichment via LightRAG not implemented
         self.graph_id = graph_id
 
     def generate_profile_from_entity(
@@ -273,133 +269,9 @@ class OasisProfileGenerator:
         suffix = random.randint(100, 999)
         return f"{username}_{suffix}"
 
-    def _search_zep_for_entity(self, entity: EntityNode) -> Dict[str, Any]:
-        """
-        Use graph hybrid search to obtain rich information related to an entity
-
-        No built-in hybrid search interface; need to search edges and nodes separately and merge results.
-        Uses parallel requests for efficiency.
-
-        Args:
-            entity: Entity node object
-
-        Returns:
-            Dictionary containing facts, node_summaries, and context
-        """
-        import concurrent.futures
-
-        if not self.zep_client:
-            return {"facts": [], "node_summaries": [], "context": ""}
-
-        entity_name = entity.name
-
-        results = {
-            "facts": [],
-            "node_summaries": [],
-            "context": ""
-        }
-
-        # graph_id is required for search
-        if not self.graph_id:
-            logger.debug(f"Skipping graph retrieval: graph_id not set")
-            return results
-
-        comprehensive_query = f"All information, activities, events, relationships and background about {entity_name}"
-
-        def search_edges():
-            """Search edges (facts/relationships) — with retry"""
-            max_retries = 3
-            last_exception = None
-            delay = 2.0
-
-            for attempt in range(max_retries):
-                try:
-                    return self.zep_client.graph.search(
-                        query=comprehensive_query,
-                        graph_id=self.graph_id,
-                        limit=30,
-                        scope="edges",
-                        reranker="rrf"
-                    )
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        logger.debug(f"Graph edge search attempt {attempt + 1} failed: {str(e)[:80]}, retrying...")
-                        time.sleep(delay)
-                        delay *= 2
-                    else:
-                        logger.debug(f"Graph edge search failed after {max_retries} attempts: {e}")
-            return None
-
-        def search_nodes():
-            """Search nodes (entity summaries) — with retry"""
-            max_retries = 3
-            last_exception = None
-            delay = 2.0
-
-            for attempt in range(max_retries):
-                try:
-                    return self.zep_client.graph.search(
-                        query=comprehensive_query,
-                        graph_id=self.graph_id,
-                        limit=20,
-                        scope="nodes",
-                        reranker="rrf"
-                    )
-                except Exception as e:
-                    last_exception = e
-                    if attempt < max_retries - 1:
-                        logger.debug(f"Graph node search attempt {attempt + 1} failed: {str(e)[:80]}, retrying...")
-                        time.sleep(delay)
-                        delay *= 2
-                    else:
-                        logger.debug(f"Graph node search failed after {max_retries} attempts: {e}")
-            return None
-
-        try:
-            # Execute edge and node searches in parallel
-            with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-                edge_future = executor.submit(search_edges)
-                node_future = executor.submit(search_nodes)
-
-                # Get results
-                edge_result = edge_future.result(timeout=30)
-                node_result = node_future.result(timeout=30)
-
-            # Process edge search results
-            all_facts = set()
-            if edge_result and hasattr(edge_result, 'edges') and edge_result.edges:
-                for edge in edge_result.edges:
-                    if hasattr(edge, 'fact') and edge.fact:
-                        all_facts.add(edge.fact)
-            results["facts"] = list(all_facts)
-
-            # Process node search results
-            all_summaries = set()
-            if node_result and hasattr(node_result, 'nodes') and node_result.nodes:
-                for node in node_result.nodes:
-                    if hasattr(node, 'summary') and node.summary:
-                        all_summaries.add(node.summary)
-                    if hasattr(node, 'name') and node.name and node.name != entity_name:
-                        all_summaries.add(f"Related entity: {node.name}")
-            results["node_summaries"] = list(all_summaries)
-
-            # Build comprehensive context
-            context_parts = []
-            if results["facts"]:
-                context_parts.append("Facts:\n" + "\n".join(f"- {f}" for f in results["facts"][:20]))
-            if results["node_summaries"]:
-                context_parts.append("Related entities:\n" + "\n".join(f"- {s}" for s in results["node_summaries"][:10]))
-            results["context"] = "\n\n".join(context_parts)
-
-            logger.info(f"Graph hybrid retrieval complete: {entity_name}, obtained {len(results['facts'])} facts, {len(results['node_summaries'])} related nodes")
-
-        except concurrent.futures.TimeoutError:
-            logger.warning(f"Graph retrieval timed out ({entity_name})")
-        except Exception as e:
-            logger.warning(f"Graph retrieval failed ({entity_name}): {e}")
-
-        return results
+    def _search_zep_for_entity(self, entity_name: str, entity_type: str = "") -> str:
+        """Search graph for entity context (Zep client removed, placeholder for future use)."""
+        return ""
 
     def _build_entity_context(self, entity: EntityNode) -> str:
         """
@@ -462,17 +334,7 @@ class OasisProfileGenerator:
             if related_info:
                 context_parts.append("### Associated Entity Information\n" + "\n".join(related_info))
 
-        # 4. Use graph hybrid search to retrieve richer information
-        zep_results = self._search_zep_for_entity(entity)
-
-        if zep_results.get("facts"):
-            # Deduplicate: exclude already existing facts
-            new_facts = [f for f in zep_results["facts"] if f not in existing_facts]
-            if new_facts:
-                context_parts.append("### Graph Retrieved Facts\n" + "\n".join(f"- {f}" for f in new_facts[:15]))
-
-        if zep_results.get("node_summaries"):
-            context_parts.append("### Graph Retrieved Related Nodes\n" + "\n".join(f"- {s}" for s in zep_results["node_summaries"][:10]))
+        # 4. Graph hybrid search placeholder (Zep client removed; reserved for future LightRAG integration)
 
         return "\n\n".join(context_parts)
 
@@ -531,7 +393,7 @@ class OasisProfileGenerator:
                     temperature=0.7 - (attempt * 0.1),  # Lower temperature on each retry
                     max_tokens=2048,
                 )
-                if _is_thinking and 'localhost' in (getattr(self.client, '_base_url', '') or ''):
+                if _is_thinking and 'localhost' in str(getattr(self.client, '_base_url', '') or ''):
                     kwargs["extra_body"] = {"options": {"num_predict": 2048}}
                 try:
                     response = self.client.chat.completions.create(
@@ -579,7 +441,18 @@ class OasisProfileGenerator:
                 logger.warning(f"LLM call failed (attempt {attempt+1}): {str(e)[:80]}")
                 last_error = e
                 import time
-                time.sleep(1 * (attempt + 1))  # Exponential backoff
+                error_str = str(e).lower()
+                # Detect quota/rate-limit errors and wait longer
+                is_rate_limit = any(marker in error_str for marker in [
+                    "429", "rate", "quota", "limit", "too many requests",
+                    "usage limit", "capacity", "overloaded"
+                ])
+                if is_rate_limit:
+                    wait_time = 30 * (attempt + 1)
+                    logger.warning(f"Rate limited, waiting {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    time.sleep(1 * (attempt + 1))  # Exponential backoff
 
         logger.warning(f"LLM persona generation failed ({max_attempts} attempts): {last_error}, falling back to rule-based generation")
         return self._generate_profile_rule_based(
@@ -587,27 +460,13 @@ class OasisProfileGenerator:
         )
 
     def _fix_truncated_json(self, content: str) -> str:
-        """Fix truncated JSON (output cut off by max_tokens limit)"""
-        import re
-
-        # If JSON is truncated, try to close it
-        content = content.strip()
-
-        # Count unclosed brackets
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
-
-        # Check for unclosed strings
-        # Simple check: if the last quote is not followed by a comma or closing bracket, the string may be truncated
-        if content and content[-1] not in '",}]':
-            # Try to close the string
-            content += '"'
-
-        # Close brackets
-        content += ']' * open_brackets
-        content += '}' * open_braces
-
-        return content
+        """Fix truncated JSON using json_repair for robust bracket/string handling"""
+        from json_repair import repair_json
+        try:
+            return repair_json(content, return_objects=False)
+        except Exception:
+            # Fallback: return as-is and let the caller handle parse errors
+            return content.strip()
 
     def _try_fix_json(self, content: str, entity_name: str, entity_type: str, entity_summary: str = "") -> Dict[str, Any]:
         """Try to repair damaged JSON"""
@@ -649,7 +508,7 @@ class OasisProfileGenerator:
                     result = json.loads(json_str)
                     result["_fixed"] = True
                     return result
-                except:
+                except Exception:
                     pass
 
         # 6. Try to extract partial information from the content

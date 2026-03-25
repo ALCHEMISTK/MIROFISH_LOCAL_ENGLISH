@@ -7,6 +7,7 @@ Uses preset scripts + LLM-generated configuration parameters
 import os
 import json
 import shutil
+import threading
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -131,22 +132,24 @@ class SimulationManager:
     # Maximum cached simulation states to prevent unbounded memory growth
     MAX_CACHED_STATES = 100
 
+    # Class-level simulation state cache (shared across all instances)
+    _simulations: Dict[str, 'SimulationState'] = {}
+    _sim_lock = threading.Lock()
+
     def __init__(self):
         # Ensure directory exists
         os.makedirs(self.SIMULATION_DATA_DIR, exist_ok=True)
 
-        # In-memory simulation state cache (bounded)
-        self._simulations: Dict[str, SimulationState] = {}
-
-    def _get_simulation_dir(self, simulation_id: str) -> str:
+    def _get_simulation_dir(self, simulation_id: str, create: bool = False) -> str:
         """Get simulation data directory"""
         sim_dir = os.path.join(self.SIMULATION_DATA_DIR, simulation_id)
-        os.makedirs(sim_dir, exist_ok=True)
+        if create:
+            os.makedirs(sim_dir, exist_ok=True)
         return sim_dir
 
     def _save_simulation_state(self, state: SimulationState):
-        """Save simulation state to file"""
-        sim_dir = self._get_simulation_dir(state.simulation_id)
+        """Save simulation state to file (thread-safe)"""
+        sim_dir = self._get_simulation_dir(state.simulation_id, create=True)
         state_file = os.path.join(sim_dir, "state.json")
 
         state.updated_at = datetime.now().isoformat()
@@ -154,21 +157,23 @@ class SimulationManager:
         with open(state_file, 'w', encoding='utf-8') as f:
             json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
 
-        self._simulations[state.simulation_id] = state
+        with self._sim_lock:
+            self._simulations[state.simulation_id] = state
 
-        # Evict oldest entries if cache grows too large
-        if len(self._simulations) > self.MAX_CACHED_STATES:
-            oldest = sorted(
-                self._simulations.values(),
-                key=lambda s: s.updated_at or ""
-            )
-            for s in oldest[:len(self._simulations) - self.MAX_CACHED_STATES]:
-                self._simulations.pop(s.simulation_id, None)
+            # Evict oldest entries if cache grows too large
+            if len(self._simulations) > self.MAX_CACHED_STATES:
+                oldest = sorted(
+                    self._simulations.values(),
+                    key=lambda s: s.updated_at or ""
+                )
+                for s in oldest[:len(self._simulations) - self.MAX_CACHED_STATES]:
+                    self._simulations.pop(s.simulation_id, None)
 
     def _load_simulation_state(self, simulation_id: str) -> Optional[SimulationState]:
-        """Load simulation state from file"""
-        if simulation_id in self._simulations:
-            return self._simulations[simulation_id]
+        """Load simulation state from file (thread-safe)"""
+        with self._sim_lock:
+            if simulation_id in self._simulations:
+                return self._simulations[simulation_id]
 
         sim_dir = self._get_simulation_dir(simulation_id)
         state_file = os.path.join(sim_dir, "state.json")
@@ -199,7 +204,8 @@ class SimulationManager:
             error=data.get("error"),
         )
 
-        self._simulations[simulation_id] = state
+        with self._sim_lock:
+            self._simulations[simulation_id] = state
         return state
 
     def create_simulation(
@@ -278,7 +284,7 @@ class SimulationManager:
             state.status = SimulationStatus.PREPARING
             self._save_simulation_state(state)
 
-            sim_dir = self._get_simulation_dir(simulation_id)
+            sim_dir = self._get_simulation_dir(simulation_id, create=True)
 
             # ========== Phase 1: Read and filter entities ==========
             if progress_callback:
@@ -496,13 +502,27 @@ class SimulationManager:
             raise ValueError(f"Simulation does not exist: {simulation_id}")
 
         sim_dir = self._get_simulation_dir(simulation_id)
-        profile_path = os.path.join(sim_dir, f"{platform}_profiles.json")
 
-        if not os.path.exists(profile_path):
-            return []
+        # Twitter profiles are saved as CSV format; Reddit profiles as JSON
+        if platform == "twitter":
+            profiles_file = os.path.join(sim_dir, "twitter_profiles.csv")
+            if not os.path.exists(profiles_file):
+                return []
+            import csv
+            profiles = []
+            with open(profiles_file, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    profiles.append(dict(row))
+            return profiles
+        else:
+            profile_path = os.path.join(sim_dir, f"{platform}_profiles.json")
 
-        with open(profile_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            if not os.path.exists(profile_path):
+                return []
+
+            with open(profile_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
 
     def get_simulation_config(self, simulation_id: str) -> Optional[Dict[str, Any]]:
         """Get simulation configuration"""

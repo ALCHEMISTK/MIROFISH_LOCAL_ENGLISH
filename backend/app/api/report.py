@@ -4,7 +4,6 @@ Provides interfaces for simulation report generation, retrieval, and conversatio
 """
 
 import os
-import traceback
 import threading
 from flask import request, jsonify, send_file
 
@@ -15,6 +14,7 @@ from ..services.simulation_manager import SimulationManager
 from ..models.project import ProjectManager
 from ..models.task import TaskManager, TaskStatus
 from ..utils.logger import get_logger
+from ..utils.id_validator import validate_id
 
 logger = get_logger('mirofish.api.report')
 
@@ -55,6 +55,8 @@ def generate_report():
                 "success": False,
                 "error": "Please provide simulation_id"
             }), 400
+
+        validate_id(simulation_id, "simulation_id")
 
         force_regenerate = data.get('force_regenerate', False)
 
@@ -190,8 +192,7 @@ def generate_report():
         logger.error(f"Failed to start report generation task: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -222,6 +223,11 @@ def get_generate_status():
 
         task_id = data.get('task_id')
         simulation_id = data.get('simulation_id')
+
+        if simulation_id:
+            validate_id(simulation_id, "simulation_id")
+        if task_id:
+            validate_id(task_id, "task_id")
 
         # If simulation_id is provided, first check if a completed report already exists
         if simulation_id:
@@ -289,6 +295,7 @@ def get_report(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         report = ReportManager.get_report(report_id)
 
         if not report:
@@ -302,12 +309,13 @@ def get_report(report_id: str):
             "data": report.to_dict()
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get report: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -326,6 +334,7 @@ def get_report_by_simulation(simulation_id: str):
         }
     """
     try:
+        validate_id(simulation_id, "simulation_id")
         report = ReportManager.get_report_by_simulation(simulation_id)
 
         if not report:
@@ -341,12 +350,13 @@ def get_report_by_simulation(simulation_id: str):
             "has_report": True
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get report: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -368,6 +378,8 @@ def list_reports():
     """
     try:
         simulation_id = request.args.get('simulation_id')
+        if simulation_id:
+            validate_id(simulation_id, "simulation_id")
         limit = request.args.get('limit', 50, type=int)
 
         reports = ReportManager.list_reports(
@@ -385,8 +397,7 @@ def list_reports():
         logger.error(f"Failed to list reports: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -398,6 +409,7 @@ def download_report(report_id: str):
     Returns a Markdown file
     """
     try:
+        validate_id(report_id, "report_id")
         report = ReportManager.get_report(report_id)
 
         if not report:
@@ -412,8 +424,18 @@ def download_report(report_id: str):
             # If the MD file does not exist, generate a temporary file
             import tempfile
             with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
-                f.write(report.markdown_content)
+                f.write(report.markdown_content or "")
                 temp_path = f.name
+
+            from flask import after_this_request
+
+            @after_this_request
+            def cleanup(response):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+                return response
 
             return send_file(
                 temp_path,
@@ -427,12 +449,13 @@ def download_report(report_id: str):
             download_name=f"{report_id}.md"
         )
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to download report: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -440,6 +463,7 @@ def download_report(report_id: str):
 def delete_report(report_id: str):
     """Delete a report"""
     try:
+        validate_id(report_id, "report_id")
         success = ReportManager.delete_report(report_id)
 
         if not success:
@@ -453,12 +477,13 @@ def delete_report(report_id: str):
             "message": f"Report deleted: {report_id}"
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to delete report: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -503,6 +528,8 @@ def chat_with_report_agent():
                 "success": False,
                 "error": "Please provide simulation_id"
             }), 400
+
+        validate_id(simulation_id, "simulation_id")
 
         if not message:
             return jsonify({
@@ -554,8 +581,7 @@ def chat_with_report_agent():
         logger.error(f"Conversation failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -580,6 +606,7 @@ def get_report_progress(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         progress = ReportManager.get_progress(report_id)
 
         if not progress:
@@ -593,12 +620,13 @@ def get_report_progress(report_id: str):
             "data": progress
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get report progress: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -628,6 +656,7 @@ def get_report_sections(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         sections = ReportManager.get_generated_sections(report_id)
 
         # Get report status
@@ -644,12 +673,13 @@ def get_report_sections(report_id: str):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get section list: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -668,6 +698,7 @@ def get_single_section(report_id: str, section_index: int):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         section_path = ReportManager._get_section_path(report_id, section_index)
 
         if not os.path.exists(section_path):
@@ -688,12 +719,13 @@ def get_single_section(report_id: str, section_index: int):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get section content: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -719,6 +751,7 @@ def check_report_status(simulation_id: str):
         }
     """
     try:
+        validate_id(simulation_id, "simulation_id")
         report = ReportManager.get_report_by_simulation(simulation_id)
 
         has_report = report is not None
@@ -739,12 +772,13 @@ def check_report_status(simulation_id: str):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to check report status: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -791,6 +825,7 @@ def get_agent_log(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         from_line = request.args.get('from_line', 0, type=int)
         limit = request.args.get('limit', 200, type=int)
         limit = min(limit, 500)  # Cap at 500 to prevent memory spikes
@@ -808,12 +843,13 @@ def get_agent_log(report_id: str):
             "data": log_data
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get Agent log: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -832,6 +868,7 @@ def stream_agent_log(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         logs = ReportManager.get_agent_log_stream(report_id)
 
         return jsonify({
@@ -842,12 +879,13 @@ def stream_agent_log(report_id: str):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get Agent log: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -881,6 +919,7 @@ def get_console_log(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         from_line = request.args.get('from_line', 0, type=int)
 
         log_data = ReportManager.get_console_log(report_id, from_line=from_line)
@@ -890,12 +929,13 @@ def get_console_log(report_id: str):
             "data": log_data
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get console log: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -914,6 +954,7 @@ def stream_console_log(report_id: str):
         }
     """
     try:
+        validate_id(report_id, "report_id")
         logs = ReportManager.get_console_log_stream(report_id)
 
         return jsonify({
@@ -924,12 +965,13 @@ def stream_console_log(report_id: str):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get console log: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -960,6 +1002,8 @@ def search_graph_tool():
                 "error": "Please provide graph_id and query"
             }), 400
 
+        validate_id(graph_id, "graph_id")
+
         from ..services.lightrag_tools import ZepToolsService
 
         tools = ZepToolsService()
@@ -978,8 +1022,7 @@ def search_graph_tool():
         logger.error(f"Graph search failed: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500
 
 
@@ -1004,6 +1047,8 @@ def get_graph_statistics_tool():
                 "error": "Please provide graph_id"
             }), 400
 
+        validate_id(graph_id, "graph_id")
+
         from ..services.lightrag_tools import ZepToolsService
 
         tools = ZepToolsService()
@@ -1018,6 +1063,5 @@ def get_graph_statistics_tool():
         logger.error(f"Failed to get graph statistics: {str(e)}")
         return jsonify({
             "success": False,
-            "error": str(e),
-            "traceback": traceback.format_exc()
+            "error": str(e)
         }), 500

@@ -92,9 +92,10 @@ const props = defineProps({
 const viewMode = ref('split')
 
 // Data State
-const currentSimulationId = ref(route.params.simulationId)
+const currentSimulationId = ref(props.simulationId)
 // Read maxRounds from query params at initialization so child components can access it immediately
-const maxRounds = ref(route.query.maxRounds ? parseInt(route.query.maxRounds) : null)
+const _parsedMaxRounds = parseInt(route.query.maxRounds)
+const maxRounds = ref(Number.isFinite(_parsedMaxRounds) ? _parsedMaxRounds : null)
 const minutesPerRound = ref(30) // Default: 30 minutes per round
 const projectData = ref(null)
 const graphData = ref(null)

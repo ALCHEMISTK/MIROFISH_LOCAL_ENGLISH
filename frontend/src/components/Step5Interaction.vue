@@ -510,6 +510,7 @@ const selectReportAgentChat = () => {
 }
 
 const selectSurveyTab = () => {
+  saveChatHistory()
   activeTab.value = 'survey'
   selectedAgent.value = null
   selectedAgentIndex.value = null
@@ -553,8 +554,13 @@ const formatTime = (timestamp) => {
 
 const renderMarkdown = (content) => {
   if (!content) return ''
-  
-  let processedContent = content.replace(/^##\s+.+\n+/, '')
+
+  // Sanitize raw HTML to prevent XSS before markdown processing
+  let processedContent = content
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+  processedContent = processedContent.replace(/^##\s+.+\n+/, '')
   let html = processedContent.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre class="code-block"><code>$2</code></pre>')
   html = html.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>')
   html = html.replace(/^#### (.+)$/gm, '<h5 class="md-h5">$1</h5>')
@@ -936,8 +942,6 @@ const handleClickOutside = (e) => {
 // Lifecycle
 onMounted(() => {
   addLog('Step5 deep interaction initialized')
-  loadReportData()
-  loadProfiles()
   document.addEventListener('click', handleClickOutside)
 })
 
