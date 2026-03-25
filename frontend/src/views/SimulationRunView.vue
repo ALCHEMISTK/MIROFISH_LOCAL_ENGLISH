@@ -356,7 +356,7 @@ onUnmounted(() => {
 
 .view-switcher {
   display: flex;
-  background: #F5F5F5;
+  background: var(--c-border-light);
   padding: 4px;
   border-radius: 6px;
   gap: 4px;
@@ -368,7 +368,7 @@ onUnmounted(() => {
   padding: 6px 16px;
   font-size: 12px;
   font-weight: 600;
-  color: #666;
+  color: var(--c-text-muted);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
@@ -423,7 +423,7 @@ onUnmounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #CCC;
+  background: var(--c-border-light);
 }
 
 .status-indicator.processing .dot { background: #FF5722; animation: pulse 1s infinite; }

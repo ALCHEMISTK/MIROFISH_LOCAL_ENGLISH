@@ -135,6 +135,11 @@
                 @dragleave.prevent="handleDragLeave"
                 @drop.prevent="handleDrop"
                 @click="triggerFileInput"
+                role="button"
+                tabindex="0"
+                aria-label="Upload files — drag and drop or click to browse (PDF, MD, TXT)"
+                @keydown.enter="triggerFileInput"
+                @keydown.space.prevent="triggerFileInput"
               >
                 <input
                   ref="fileInput"
@@ -144,6 +149,7 @@
                   @change="handleFileSelect"
                   style="display: none"
                   :disabled="loading"
+                  aria-label="Select files to upload"
                 />
 
                 <div v-if="files.length === 0" class="upload-placeholder">
@@ -182,11 +188,15 @@
               </div>
             </div>
 
+            <div v-if="error" class="error-message" style="color: #F44336; font-size: 13px; padding: 8px 12px; margin-bottom: 8px; border: 1px solid #F44336; border-radius: 4px; background: rgba(244,67,54,0.08);">
+              {{ error }}
+            </div>
             <div class="console-section btn-section">
               <button
                 class="start-engine-btn"
                 @click="startSimulation"
                 :disabled="!canSubmit || loading"
+                aria-label="Launch simulation engine"
               >
                 <span v-if="!loading">Launch Engine</span>
                 <span v-else>Initializing...</span>
@@ -207,6 +217,7 @@ import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import HistoryDatabase from '../components/HistoryDatabase.vue'
 import { useTheme } from '../store/theme'
+import { setPendingUpload } from '../store/pendingUpload'
 
 const { isDark, toggle } = useTheme()
 
@@ -276,13 +287,16 @@ const scrollToBottom = () => {
 
 const startSimulation = () => {
   if (!canSubmit.value || loading.value) return
-  import('../store/pendingUpload.js').then(({ setPendingUpload }) => {
+  error.value = ''
+  try {
     setPendingUpload(files.value, formData.value.simulationRequirement)
     router.push({
       name: 'Process',
       params: { projectId: 'new' }
     })
-  })
+  } catch (e) {
+    error.value = e.message || 'Failed to start simulation'
+  }
 }
 </script>
 

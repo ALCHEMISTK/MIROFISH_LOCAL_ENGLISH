@@ -128,15 +128,18 @@ class LLMClient:
 
         try:
             return json.loads(cleaned_response)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as parse_err:
             try:
                 from json_repair import repair_json
                 repaired = repair_json(cleaned_response, return_objects=True)
                 if repaired:
                     return repaired
-            except Exception:
-                pass
-            raise ValueError(f"Invalid JSON format returned by LLM: {cleaned_response}")
+            except Exception as repair_err:
+                logger.warning(f"JSON repair also failed: {repair_err}")
+            raise ValueError(
+                f"Invalid JSON format returned by LLM (parse: {parse_err}): "
+                f"{cleaned_response[:200]}"
+            )
 
     def chat(
         self,

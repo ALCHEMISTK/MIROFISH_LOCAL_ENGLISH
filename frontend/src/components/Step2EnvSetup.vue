@@ -642,10 +642,10 @@ import {
 } from '../api/simulation'
 
 const props = defineProps({
-  simulationId: String,  // Passed from parent component
-  projectData: Object,
-  graphData: Object,
-  systemLogs: Array
+  simulationId: { type: String, default: null },
+  projectData: { type: Object, default: null },
+  graphData: { type: Object, default: null },
+  systemLogs: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status'])

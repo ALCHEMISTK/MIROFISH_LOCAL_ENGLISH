@@ -313,15 +313,12 @@ import {
 import { generateReport } from '../api/report'
 
 const props = defineProps({
-  simulationId: String,
-  maxRounds: Number, // max rounds passed in from Step 2
-  minutesPerRound: {
-    type: Number,
-    default: 30 // default 30 minutes per round
-  },
-  projectData: Object,
-  graphData: Object,
-  systemLogs: Array
+  simulationId: { type: String, required: true },
+  maxRounds: { type: Number, default: null },
+  minutesPerRound: { type: Number, default: 30 },
+  projectData: { type: Object, default: null },
+  graphData: { type: Object, default: null },
+  systemLogs: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['go-back', 'next-step', 'add-log', 'update-status'])

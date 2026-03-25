@@ -4,7 +4,11 @@ Stores configuration in a JSON file, with fallback to .env values.
 """
 
 import json
+import logging
 import os
+import sys
+
+_settings_logger = logging.getLogger('mirofish.settings')
 
 SETTINGS_DIR = os.path.join(os.path.dirname(__file__), '..', 'data')
 SETTINGS_PATH = os.path.join(SETTINGS_DIR, 'settings.json')
@@ -34,7 +38,20 @@ def load_settings():
         merged = dict(DEFAULT_SETTINGS)
         merged.update(stored)
         return merged
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError as e:
+        _settings_logger.warning(
+            f"Corrupted settings.json ({e}), backing up and returning defaults"
+        )
+        try:
+            backup_path = SETTINGS_PATH + '.corrupt'
+            if os.path.exists(SETTINGS_PATH):
+                os.replace(SETTINGS_PATH, backup_path)
+                _settings_logger.info(f"Corrupted file backed up to {backup_path}")
+        except OSError:
+            pass
+        return dict(DEFAULT_SETTINGS)
+    except OSError as e:
+        _settings_logger.warning(f"Could not read settings.json ({e}), returning defaults")
         return dict(DEFAULT_SETTINGS)
 
 
@@ -54,6 +71,12 @@ def save_settings(settings):
             os.replace(tmp_path, SETTINGS_PATH)
         else:
             os.rename(tmp_path, SETTINGS_PATH)
+        # Restrict permissions on non-Windows (settings may contain API keys)
+        if sys.platform != 'win32':
+            try:
+                os.chmod(SETTINGS_PATH, 0o600)
+            except OSError:
+                pass
     except Exception:
         try:
             os.unlink(tmp_path)

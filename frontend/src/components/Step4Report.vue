@@ -393,13 +393,14 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick, h, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { getAgentLog, getConsoleLog } from '../api/report'
+import { sanitizeHtml } from '../utils/sanitize'
 
 const router = useRouter()
 
 const props = defineProps({
-  reportId: String,
-  simulationId: String,
-  systemLogs: Array
+  reportId: { type: String, required: true },
+  simulationId: { type: String, default: null },
+  systemLogs: { type: Array, default: () => [] }
 })
 
 const emit = defineEmits(['add-log', 'update-status'])
@@ -1973,7 +1974,7 @@ const renderMarkdown = (content) => {
   }
   html = tokens.join('')
 
-  return html
+  return sanitizeHtml(html)
 }
 
 const getTimelineItemClass = (log, idx, total) => {

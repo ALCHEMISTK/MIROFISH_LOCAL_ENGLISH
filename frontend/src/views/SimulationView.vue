@@ -342,7 +342,7 @@ onMounted(async () => {
 
 .view-switcher {
   display: flex;
-  background: #F5F5F5;
+  background: var(--c-border-light);
   padding: 4px;
   border-radius: 6px;
   gap: 4px;
@@ -354,7 +354,7 @@ onMounted(async () => {
   padding: 6px 16px;
   font-size: 12px;
   font-weight: 600;
-  color: #666;
+  color: var(--c-text-muted);
   border-radius: 4px;
   cursor: pointer;
   transition: all 0.2s;
@@ -382,7 +382,7 @@ onMounted(async () => {
 .step-num {
   font-family: 'JetBrains Mono', monospace;
   font-weight: 700;
-  color: #999;
+  color: var(--c-text-muted);
 }
 
 .step-name {
@@ -401,7 +401,7 @@ onMounted(async () => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #666;
+  color: var(--c-text-muted);
   font-weight: 500;
 }
 
@@ -409,7 +409,7 @@ onMounted(async () => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #CCC;
+  background: var(--c-border-light);
 }
 
 .status-indicator.processing .dot { background: #FF5722; animation: pulse 1s infinite; }

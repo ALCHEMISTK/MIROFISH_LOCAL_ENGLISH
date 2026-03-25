@@ -926,11 +926,11 @@ class ReportAgent:
     3. Reflection phase: Check content completeness and accuracy
     """
 
-    # Maximum tool calls per section
-    MAX_TOOL_CALLS_PER_SECTION = 5
+    # Maximum tool calls per section (from Config / env)
+    MAX_TOOL_CALLS_PER_SECTION = Config.REPORT_AGENT_MAX_TOOL_CALLS
 
-    # Maximum reflection rounds
-    MAX_REFLECTION_ROUNDS = 3
+    # Maximum reflection rounds (from Config / env)
+    MAX_REFLECTION_ROUNDS = Config.REPORT_AGENT_MAX_REFLECTION_ROUNDS
 
     # Maximum tool calls per chat turn
     MAX_TOOL_CALLS_PER_CHAT = 2

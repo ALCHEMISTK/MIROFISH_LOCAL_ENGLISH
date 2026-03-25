@@ -249,10 +249,10 @@ const edgeLabelColor = () => isDarkMode() ? '#aaaaaa' : '#666666'
 const edgeLabelBgColor = () => isDarkMode() ? 'rgba(20,20,20,0.88)' : 'rgba(255,255,255,0.95)'
 
 const props = defineProps({
-  graphData: Object,
-  loading: Boolean,
-  currentPhase: Number,
-  isSimulating: Boolean
+  graphData: { type: Object, default: null },
+  loading: { type: Boolean, default: false },
+  currentPhase: { type: Number, default: -1 },
+  isSimulating: { type: Boolean, default: false }
 })
 
 const emit = defineEmits(['refresh', 'toggle-maximize'])

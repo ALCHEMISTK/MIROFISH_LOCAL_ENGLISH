@@ -195,10 +195,10 @@ const router = useRouter()
 
 const props = defineProps({
   currentPhase: { type: Number, default: 0 },
-  projectData: Object,
-  ontologyProgress: Object,
-  buildProgress: Object,
-  graphData: Object,
+  projectData: { type: Object, default: null },
+  ontologyProgress: { type: Object, default: null },
+  buildProgress: { type: Object, default: null },
+  graphData: { type: Object, default: null },
   systemLogs: { type: Array, default: () => [] }
 })
 

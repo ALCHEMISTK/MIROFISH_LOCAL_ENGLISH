@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, List, Optional, Set
 from dataclasses import dataclass, field
 
+from ..config import Config
 from ..utils.logger import get_logger
 from .lightrag_client import get_working_dir
 
@@ -67,19 +68,20 @@ import threading
 
 _graph_cache: Dict[str, Any] = {}  # graph_id -> (graph, timestamp)
 _graph_cache_lock = threading.Lock()
-_GRAPH_CACHE_TTL = 60  # seconds
 
 
 def _load_graph(graph_id: str):
     """Read the LightRAG GraphML file for a given graph_id. Returns empty Graph if not found.
-    Results are cached for 60 seconds to avoid repeated disk reads."""
+    Results are cached with configurable TTL to avoid repeated disk reads."""
     import networkx as nx
 
+    cache_ttl = Config.CACHE_TTL_SECONDS
+    cache_max = Config.CACHE_MAX_SIZE
     now = _time.time()
     with _graph_cache_lock:
         if graph_id in _graph_cache:
             graph, ts = _graph_cache[graph_id]
-            if now - ts < _GRAPH_CACHE_TTL:
+            if now - ts < cache_ttl:
                 return graph
 
     working_dir = get_working_dir(graph_id)
@@ -89,10 +91,14 @@ def _load_graph(graph_id: str):
         return nx.Graph()
     graph = nx.read_graphml(graphml_path)
     with _graph_cache_lock:
-        # Evict expired entries to prevent unbounded growth
-        expired = [k for k, (_, ts) in list(_graph_cache.items()) if now - ts >= _GRAPH_CACHE_TTL]
+        # Evict expired entries
+        expired = [k for k, (_, ts) in list(_graph_cache.items()) if now - ts >= cache_ttl]
         for k in expired:
             _graph_cache.pop(k, None)
+        # Evict oldest if cache exceeds max size
+        while len(_graph_cache) >= cache_max:
+            oldest_key = min(_graph_cache, key=lambda k: _graph_cache[k][1])
+            _graph_cache.pop(oldest_key, None)
         _graph_cache[graph_id] = (graph, now)
     return graph
 

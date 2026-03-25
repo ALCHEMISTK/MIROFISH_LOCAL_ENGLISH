@@ -76,9 +76,10 @@ router.beforeEach(async (to, from, next) => {
     if (!configured) return next({ name: 'Setup' })
     next()
   } catch (e) {
-    // Backend not reachable - let user proceed (they'll see errors)
+    // Backend not reachable - redirect to setup so user can fix config.
     // Don't cache this result so it re-checks next navigation.
-    next()
+    console.warn('Setup check failed (backend unreachable?):', e.message)
+    next({ name: 'Setup' })
   }
 })
 

@@ -228,6 +228,7 @@ const handleNewProject = async () => {
   } catch (err) {
     error.value = err.message
     addLog(`Exception in handleNewProject: ${err.message}`)
+    clearPendingUpload()
   } finally {
     loading.value = false
   }
@@ -297,6 +298,7 @@ const startBuildGraph = async () => {
 }
 
 const startGraphPolling = () => {
+  if (graphPollTimer) clearInterval(graphPollTimer)
   addLog('Started polling for graph data...')
   fetchGraphData()
   graphPollTimer = setInterval(fetchGraphData, 10000)
@@ -321,6 +323,7 @@ const fetchGraphData = async () => {
 }
 
 const startPollingTask = (taskId) => {
+  if (pollTimer) clearInterval(pollTimer)
   pollTaskStatus(taskId)
   pollTimer = setInterval(() => pollTaskStatus(taskId), 2000)
 }

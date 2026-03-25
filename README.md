@@ -100,66 +100,63 @@ Click the image to watch MiroFish's deep prediction of the lost ending based on 
 | Tool | Version | Description | Check Installation |
 |------|---------|-------------|-------------------|
 | **Node.js** | 18+ | Frontend runtime, includes npm | `node -v` |
-| **Python** | ≥3.11, ≤3.12 | Backend runtime | `python --version` |
+| **Python** | ≥3.11 | Backend runtime | `python --version` |
 | **uv** | Latest | Python package manager | `uv --version` |
 
-#### 1. Configure Environment Variables
+#### 1. Install Prerequisites
 
 ```bash
-# Copy the example configuration file
-cp .env.example .env
-
-# Edit the .env file and fill in the required API keys
+# Install Ollama models (for fully local, free operation)
+ollama pull qwen2.5:7b
+ollama pull nomic-embed-text
 ```
 
-**Required Environment Variables:**
-
-```env
-# LLM API Configuration (supports any LLM API with OpenAI SDK format)
-# Recommended: Alibaba Qwen-plus model via Bailian Platform: https://bailian.console.aliyun.com/
-# High consumption, try simulations with fewer than 40 rounds first
-LLM_API_KEY=your_api_key
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-LLM_MODEL_NAME=qwen-plus
-
-# Zep Cloud Configuration
-# Free monthly quota is sufficient for simple usage: https://app.getzep.com/
-ZEP_API_KEY=your_zep_api_key
-```
+> **Cloud alternative:** Skip Ollama and configure any OpenAI-compatible API (OpenAI, DeepSeek, etc.) via the web setup page.
 
 #### 2. Install Dependencies
 
 ```bash
 # One-click installation of all dependencies (root + frontend + backend)
-npm run setup:all
+npm run install:all
 ```
 
 Or install step by step:
 
 ```bash
 # Install Node dependencies (root + frontend)
-npm run setup
+npm install && cd frontend && npm install
 
 # Install Python dependencies (backend, auto-creates virtual environment)
-npm run setup:backend
+npm run install:backend
 ```
 
 #### 3. Start Services
 
 ```bash
 # Start both frontend and backend (run from project root)
-npm run dev
+npm start
 ```
 
 **Service URLs:**
+
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:5001`
+
+#### 4. Configure via Web UI
+
+On first launch, you'll be redirected to the **Setup** page:
+
+- Click **"Ollama (Local)"** preset for local operation (recommended)
+- Or click **"OpenAI"** preset and enter your API key for cloud operation
+- Click **Save & Continue**
+
+> No `.env` editing required! The web UI handles all configuration. Advanced users can still override settings via `.env` (highest priority) or `backend/data/settings.json`.
 
 **Start Individually:**
 
 ```bash
-npm run backend   # Start backend only
-npm run frontend  # Start frontend only
+npm run backend   # Start backend only (Flask on :5001)
+npm run frontend  # Start frontend only (Vite on :3000)
 ```
 
 ### Option 2: Docker Deployment

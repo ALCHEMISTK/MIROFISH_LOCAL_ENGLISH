@@ -262,6 +262,10 @@ class _LoopThread:
             return future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
             future.cancel()
+            logger.warning(
+                f"LightRAG coroutine timed out after {timeout}s — "
+                f"the underlying task may still be running in the event loop"
+            )
             raise TimeoutError(f"LightRAG coroutine timed out after {timeout} seconds")
 
 

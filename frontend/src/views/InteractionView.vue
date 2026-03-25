@@ -257,7 +257,7 @@ onMounted(() => {
 
 .view-switcher {
   display: flex;
-  background: #F5F5F5;
+  background: var(--c-border-light);
   padding: 4px;
   border-radius: 6px;
   gap: 4px;
@@ -324,7 +324,7 @@ onMounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #CCC;
+  background: var(--c-border-light);
 }
 
 .status-indicator.ready .dot { background: #4CAF50; }

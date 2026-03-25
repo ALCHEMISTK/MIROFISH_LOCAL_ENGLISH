@@ -83,6 +83,11 @@ class Config:
 
     @classmethod
     def _preset(cls, key):
+        if cls.SIMULATION_MODE not in cls._PRESETS:
+            import logging
+            logging.getLogger('mirofish.config').warning(
+                f"Invalid SIMULATION_MODE='{cls.SIMULATION_MODE}', falling back to 'fast'"
+            )
         return cls._PRESETS.get(cls.SIMULATION_MODE, cls._PRESETS['fast'])[key]
 
     @classmethod
@@ -121,6 +126,12 @@ class Config:
         'LIKE_COMMENT', 'DISLIKE_COMMENT', 'SEARCH_POSTS', 'SEARCH_USER',
         'TREND', 'REFRESH', 'DO_NOTHING', 'FOLLOW', 'MUTE'
     ]
+
+    # Graph & cache settings
+    GRAPH_BUILD_BATCH_SIZE = int(os.environ.get('GRAPH_BUILD_BATCH_SIZE', '3'))
+    DEFAULT_LIST_LIMIT = int(os.environ.get('DEFAULT_LIST_LIMIT', '50'))
+    CACHE_MAX_SIZE = int(os.environ.get('CACHE_MAX_SIZE', '50'))
+    CACHE_TTL_SECONDS = int(os.environ.get('CACHE_TTL_SECONDS', '60'))
 
     # Report Agent
     REPORT_AGENT_MAX_TOOL_CALLS = int(os.environ.get('REPORT_AGENT_MAX_TOOL_CALLS', '5'))

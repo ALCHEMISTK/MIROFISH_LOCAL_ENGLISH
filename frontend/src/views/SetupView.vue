@@ -24,8 +24,8 @@
 
           <!-- Preset buttons -->
           <div class="preset-row">
-            <button class="preset-btn" @click="applyOllamaPreset">Ollama (Local)</button>
-            <button class="preset-btn" @click="applyOpenAIPreset">OpenAI</button>
+            <button class="preset-btn" @click="applyOllamaPreset" aria-label="Apply Ollama local preset configuration">Ollama (Local)</button>
+            <button class="preset-btn" @click="applyOpenAIPreset" aria-label="Apply OpenAI cloud preset configuration">OpenAI</button>
           </div>
 
           <div class="form-group">
@@ -113,6 +113,7 @@
             class="validate-btn"
             @click="validateKeys"
             :disabled="!canValidate || validating"
+            aria-label="Validate LLM API connection"
           >
             {{ validating ? 'Validating...' : 'Validate Keys' }}
           </button>
@@ -120,6 +121,7 @@
             class="save-btn"
             @click="saveAndContinue"
             :disabled="!canSave || saving"
+            aria-label="Save configuration and continue to main app"
           >
             {{ saving ? 'Saving...' : 'Save & Continue' }}
           </button>
@@ -155,11 +157,11 @@ const statusMessage = ref('')
 const statusType = ref('info')
 
 const canValidate = computed(() => {
-  return form.value.llm_base_url.trim() !== '' && form.value.llm_model_name.trim() !== ''
+  return !validating.value && !saving.value && form.value.llm_base_url.trim() !== '' && form.value.llm_model_name.trim() !== ''
 })
 
 const canSave = computed(() => {
-  return form.value.llm_base_url.trim() !== '' && form.value.llm_model_name.trim() !== ''
+  return !saving.value && !validating.value && form.value.llm_base_url.trim() !== '' && form.value.llm_model_name.trim() !== ''
 })
 
 const applyOllamaPreset = () => {

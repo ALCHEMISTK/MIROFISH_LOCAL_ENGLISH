@@ -414,10 +414,11 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { chatWithReport, getReport, getAgentLog } from '../api/report'
 import { interviewAgents, getSimulationProfilesRealtime } from '../api/simulation'
+import { sanitizeHtml } from '../utils/sanitize'
 
 const props = defineProps({
-  reportId: String,
-  simulationId: String
+  reportId: { type: String, required: true },
+  simulationId: { type: String, default: null }
 })
 
 const emit = defineEmits(['add-log', 'update-status'])
@@ -641,7 +642,7 @@ const renderMarkdown = (content) => {
   }
   html = tokens.join('')
 
-  return html
+  return sanitizeHtml(html)
 }
 
 // Chat Methods

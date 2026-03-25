@@ -11,6 +11,7 @@ import networkx as nx
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 
+from ..config import Config
 from ..utils.logger import get_logger
 from ..utils.llm_client import LLMClient
 from .lightrag_client import get_working_dir
@@ -262,6 +263,12 @@ class ZepToolsService:
     (via LLMClient) to synthesise answers. Works for both local Ollama
     and any cloud API configured in .env - no LightRAG vector engine needed.
     Constructor accepts optional api_key for signature compatibility (ignored).
+
+    TODO: This class has grown into a god-class (650+ lines, 25+ methods).
+    Future refactor should split it into:
+      - GraphReader: graph loading, caching, node/edge retrieval
+      - QuerySynthesizer: LLM-based search, insight_forge, panorama
+      - InterviewSimulator: agent interview logic
     """
 
     _MODE_NODE_LIMIT = {"global": 30, "hybrid": 20, "local": 15, "naive": 10}
@@ -275,7 +282,8 @@ class ZepToolsService:
     def _get_graph(self, graph_id: str):
         """Load and cache GraphML to avoid repeated disk reads."""
         import time as _time
-        cache_ttl = 60  # seconds
+        cache_ttl = Config.CACHE_TTL_SECONDS
+        cache_max = Config.CACHE_MAX_SIZE
         now = _time.time()
         with self._graph_cache_lock:
             if graph_id in self._graph_cache:
@@ -289,10 +297,14 @@ class ZepToolsService:
         try:
             graph = nx.read_graphml(graphml_path)
             with self._graph_cache_lock:
-                # Evict expired entries to prevent unbounded growth
+                # Evict expired entries
                 expired = [k for k, (_, ts) in list(self._graph_cache.items()) if now - ts >= cache_ttl]
                 for k in expired:
                     self._graph_cache.pop(k, None)
+                # Evict oldest if cache exceeds max size
+                while len(self._graph_cache) >= cache_max:
+                    oldest_key = min(self._graph_cache, key=lambda k: self._graph_cache[k][1])
+                    self._graph_cache.pop(oldest_key, None)
                 self._graph_cache[graph_id] = (graph, now)
             return graph
         except Exception as e:

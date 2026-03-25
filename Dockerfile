@@ -26,4 +26,4 @@ COPY . .
 EXPOSE 3000 5001
 
 # Start both frontend and backend (dev mode)
-CMD ["npm", "run", "dev"]
+CMD ["npm", "start"]
