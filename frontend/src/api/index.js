@@ -28,7 +28,9 @@ service.interceptors.response.use(
     // If the returned status code is not success, throw an error
     if (!res.success && res.success !== undefined) {
       console.error('API Error:', res.error || res.message || 'Unknown error')
-      return Promise.reject(new Error(res.error || res.message || 'Error'))
+      const error = new Error(res.error || res.message || 'Error');
+      error.isBusinessError = true;
+      return Promise.reject(error)
     }
 
     return res
@@ -56,6 +58,10 @@ export const requestWithRetry = async (requestFn, maxRetries = 3, delay = 1000) 
     try {
       return await requestFn()
     } catch (error) {
+      // Don't retry business logic errors (server responded with success: false)
+      if (error.isBusinessError) {
+        throw error;
+      }
       if (i === maxRetries - 1) throw error
       
       console.warn(`Request failed, retrying (${i + 1}/${maxRetries})...`)

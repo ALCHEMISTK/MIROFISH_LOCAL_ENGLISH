@@ -39,10 +39,27 @@ def load_settings():
 
 
 def save_settings(settings):
-    """Save settings to JSON file."""
+    """Save settings to JSON file (atomic write)."""
     os.makedirs(SETTINGS_DIR, exist_ok=True)
-    with open(SETTINGS_PATH, 'w', encoding='utf-8') as f:
-        json.dump(settings, f, indent=2, ensure_ascii=False)
+    import tempfile
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=SETTINGS_DIR,
+        suffix='.tmp'
+    )
+    try:
+        with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+            json.dump(settings, f, indent=2, ensure_ascii=False)
+        # Atomic rename (on Windows, need to remove target first)
+        if os.path.exists(SETTINGS_PATH):
+            os.replace(tmp_path, SETTINGS_PATH)
+        else:
+            os.rename(tmp_path, SETTINGS_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 
 def is_configured():

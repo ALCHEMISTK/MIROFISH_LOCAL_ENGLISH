@@ -181,6 +181,8 @@ class LLMClient:
         while True:
             try:
                 response = self.client.chat.completions.create(**kwargs)
+                if not response.choices:
+                    raise ValueError("LLM returned empty choices list")
                 content = self._clean_content(response.choices[0].message.content)
                 if content:
                     return content

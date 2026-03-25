@@ -89,7 +89,7 @@ const props = defineProps({
 const viewMode = ref('split')
 
 // Data State
-const currentSimulationId = ref(route.params.simulationId)
+const currentSimulationId = ref(props.simulationId)
 const projectData = ref(null)
 const graphData = ref(null)
 const graphLoading = ref(false)

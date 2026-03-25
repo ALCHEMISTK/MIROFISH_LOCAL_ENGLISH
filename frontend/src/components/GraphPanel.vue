@@ -787,8 +787,8 @@ const renderGraph = () => {
     selectedItem.value = null
     node.attr('stroke', '#fff').attr('stroke-width', 2.5)
     linkGroup.selectAll('path').attr('stroke', '#C0C0C0').attr('stroke-width', 1.5)
-    linkLabelBg.attr('fill', 'rgba(255,255,255,0.95)')
-    linkLabels.attr('fill', '#666')
+    linkLabelBg.attr('fill', edgeLabelBgColor())
+    linkLabels.attr('fill', edgeLabelColor())
   })
 }
 
@@ -823,6 +823,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   if (currentSimulation) {
     currentSimulation.stop()
+    currentSimulation = null
   }
 })
 </script>

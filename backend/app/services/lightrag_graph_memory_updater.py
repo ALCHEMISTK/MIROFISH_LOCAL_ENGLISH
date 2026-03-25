@@ -265,8 +265,8 @@ class ZepGraphMemoryManager:
         """Background thread: flush activities periodically."""
         import time
         while self._running:
-            time.sleep(self.flush_interval)
             self._flush_batch()
+            time.sleep(self.flush_interval)
 
     def _flush_batch(self):
         """Flush up to batch_size activities from the queue."""

@@ -58,7 +58,6 @@ def create_app(config_class=Config):
         return {'status': 'ok', 'service': 'MiroFish Backend'}
 
     # Activity logging middleware — log meaningful API calls to the console
-    _NOISY_PATHS = {'/health', '/api/simulation/'}  # prefixes to skip
     _POLLING_SUFFIXES = (
         '/run-status', '/progress', '/agent-log', '/console-log',
         '/profiles/stream', '/config/stream', '/prepare/status',

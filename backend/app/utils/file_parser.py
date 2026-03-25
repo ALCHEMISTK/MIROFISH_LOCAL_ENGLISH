@@ -160,6 +160,9 @@ def split_text_into_chunks(
     Returns:
         List of text chunks
     """
+    if overlap >= chunk_size:
+        overlap = chunk_size // 2
+
     if len(text) <= chunk_size:
         return [text] if text.strip() else []
 

@@ -738,7 +738,7 @@ watch(() => props.systemLogs?.length, () => {
 
 onMounted(() => {
   addLog('Step 3 simulation initialized')
-  if (props.simulationId) {
+  if (props.simulationId && phase.value === 0) {
     doStartSimulation()
   }
 })

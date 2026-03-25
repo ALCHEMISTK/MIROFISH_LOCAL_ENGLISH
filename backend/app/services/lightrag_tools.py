@@ -6,6 +6,7 @@ Exports identical class/dataclass names so callers need only swap the import.
 """
 
 import os
+import threading
 import networkx as nx
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
@@ -269,27 +270,30 @@ class ZepToolsService:
     def __init__(self, api_key: Optional[str] = None, llm_client: Optional[LLMClient] = None):
         self._llm_client = llm_client
         self._graph_cache: Dict[str, Any] = {}  # graph_id -> (graph, timestamp)
+        self._graph_cache_lock = threading.Lock()
 
     def _get_graph(self, graph_id: str):
         """Load and cache GraphML to avoid repeated disk reads."""
         import time as _time
         cache_ttl = 60  # seconds
         now = _time.time()
-        if graph_id in self._graph_cache:
-            graph, ts = self._graph_cache[graph_id]
-            if now - ts < cache_ttl:
-                return graph
+        with self._graph_cache_lock:
+            if graph_id in self._graph_cache:
+                graph, ts = self._graph_cache[graph_id]
+                if now - ts < cache_ttl:
+                    return graph
 
         graphml_path = os.path.join(get_working_dir(graph_id), "graph_chunk_entity_relation.graphml")
         if not os.path.exists(graphml_path):
             return None
         try:
             graph = nx.read_graphml(graphml_path)
-            # Evict expired entries to prevent unbounded growth
-            expired = [k for k, (_, ts) in self._graph_cache.items() if now - ts >= cache_ttl]
-            for k in expired:
-                self._graph_cache.pop(k, None)
-            self._graph_cache[graph_id] = (graph, now)
+            with self._graph_cache_lock:
+                # Evict expired entries to prevent unbounded growth
+                expired = [k for k, (_, ts) in list(self._graph_cache.items()) if now - ts >= cache_ttl]
+                for k in expired:
+                    self._graph_cache.pop(k, None)
+                self._graph_cache[graph_id] = (graph, now)
             return graph
         except Exception as e:
             logger.warning(f"Could not read GraphML for {graph_id}: {e}")
@@ -324,10 +328,10 @@ class ZepToolsService:
                     logger.error(f"LLM call failed: {e}")
                     raise
 
-        logger.error("Max retries exceeded for LLM graph query.")
+        logger.warning(f"All {max_retries} LLM retry attempts exhausted for query")
         return ""
 
-    def _query_rag(self, graph_id: str, query: str, mode: str = "hybrid") -> str:
+    def _query_rag(self, graph_id: str, query: str, mode: str = "hybrid") -> Dict[str, Any]:
         """
         Search the knowledge graph and synthesise an answer using the LLM.
 
@@ -342,10 +346,13 @@ class ZepToolsService:
           hybrid -> broader match across nodes AND relationships
           global -> full graph overview
           naive  -> quick keyword match, minimal context
+
+        Returns a dict with keys: text, nodes, edges
         """
+        _empty = {"text": "", "nodes": [], "edges": []}
         G = self._get_graph(graph_id)
         if G is None or G.number_of_nodes() == 0:
-            return ""
+            return _empty
 
         node_limit = self._MODE_NODE_LIMIT.get(mode, 15)
         edge_limit = self._MODE_EDGE_LIMIT.get(mode, 15)
@@ -399,23 +406,42 @@ class ZepToolsService:
                 or list(G.edges(data=True))[:edge_limit]
             )
 
-        node_lines = []
+        # Build structured node/edge dicts for callers
+        result_nodes = []
         for nid, data in selected_nodes:
             name = data.get("name", data.get("entity_name", nid))
             entity_type = data.get("type", data.get("entity_type", ""))
             desc = data.get("description", "")
-            if entity_type:
-                node_lines.append(f"- {name} ({entity_type}): {desc}")
-            else:
-                node_lines.append(f"- {name}: {desc}")
+            result_nodes.append({
+                "id": nid,
+                "name": name,
+                "type": entity_type,
+                "description": desc,
+            })
 
-        edge_lines = []
+        result_edges = []
         for src, tgt, data in selected_edges:
             rel = data.get("type", data.get("keywords", "RELATED_TO"))
             desc = data.get("description", "")
             src_name = node_name_map.get(src, src)
             tgt_name = node_name_map.get(tgt, tgt)
-            edge_lines.append(f"- {src_name} --[{rel}]--> {tgt_name}: {desc}")
+            result_edges.append({
+                "source": src_name,
+                "target": tgt_name,
+                "relation": rel,
+                "description": desc,
+            })
+
+        node_lines = []
+        for n in result_nodes:
+            if n["type"]:
+                node_lines.append(f"- {n['name']} ({n['type']}): {n['description']}")
+            else:
+                node_lines.append(f"- {n['name']}: {n['description']}")
+
+        edge_lines = []
+        for e in result_edges:
+            edge_lines.append(f"- {e['source']} --[{e['relation']}]--> {e['target']}: {e['description']}")
 
         context_parts = []
         if node_lines:
@@ -425,7 +451,7 @@ class ZepToolsService:
         context = "\n\n".join(context_parts)
 
         if not context:
-            return ""
+            return _empty
 
         synthesis_prompt = (
             "Based on the following knowledge graph data, answer this question concisely:\n"
@@ -435,17 +461,26 @@ class ZepToolsService:
             "If the information is insufficient, briefly summarise what is available."
         )
 
+        llm_failed = False
         try:
             result = self._llm_call_with_retry(synthesis_prompt)
             logger.info(f"_query_rag ({mode}): {query[:50]}... -> {len(result)} chars")
-            return result or context
+            text = result or context
+            if not result:
+                llm_failed = True
         except Exception as e:
             logger.warning(f"_query_rag LLM synthesis failed, returning raw context: {e}")
-            return context
+            text = context
+            llm_failed = True
 
-    def _parse_facts(self, text: str, limit: int = 20) -> List[str]:
+        return {"text": text, "nodes": result_nodes, "edges": result_edges, "llm_failed": llm_failed}
+
+    def _parse_facts(self, text: str, limit: int = 20, raw_context: bool = False) -> List[str]:
         """Parse LightRAG text output into a list of fact strings."""
         lines = [l.strip() for l in text.split('\n') if l.strip() and not l.startswith('#')]
+        if raw_context:
+            # Filter out formatting artifacts from raw context fallback
+            lines = [f for f in lines if f and not f.startswith("Entities:") and not f.startswith("Relationships:") and not f.startswith("---")]
         return lines[:limit]
 
     def search_graph(
@@ -456,12 +491,12 @@ class ZepToolsService:
         scope: str = "edges",
     ) -> SearchResult:
         """Quick local search (maps to LightRAG local mode)."""
-        raw = self._query_rag(graph_id, query, mode="local")
-        facts = self._parse_facts(raw, limit=limit)
+        result = self._query_rag(graph_id, query, mode="local")
+        facts = self._parse_facts(result["text"], limit=limit, raw_context=result.get("llm_failed", False))
         return SearchResult(
             facts=facts,
-            edges=[],
-            nodes=[],
+            edges=result["edges"],
+            nodes=result["nodes"],
             query=query,
             total_count=len(facts),
         )
@@ -480,8 +515,10 @@ class ZepToolsService:
     ) -> InsightForgeResult:
         """Deep hybrid search (maps to LightRAG hybrid mode)."""
         logger.info(f"InsightForge deep insight retrieval: {query[:80]}...")
-        raw = self._query_rag(graph_id, query, mode="hybrid")
-        facts = self._parse_facts(raw, limit=max_facts)
+        result = self._query_rag(graph_id, query, mode="hybrid")
+        facts = self._parse_facts(result["text"], limit=max_facts, raw_context=result.get("llm_failed", False))
+        collected_nodes = list(result["nodes"])
+        collected_edges = list(result["edges"])
 
         # Generate sub-questions via LLM if requested
         sub_questions: List[str] = []
@@ -505,11 +542,18 @@ class ZepToolsService:
                 logger.info(f"InsightForge generated {len(sub_questions)} sub-questions")
                 # Run additional queries for each sub-question and merge results
                 for sq in sub_questions:
-                    sq_raw = self._query_rag(graph_id, sq, mode="local")
-                    sq_facts = self._parse_facts(sq_raw, limit=5)
+                    sq_result = self._query_rag(graph_id, sq, mode="local")
+                    sq_facts = self._parse_facts(sq_result["text"], limit=5, raw_context=sq_result.get("llm_failed", False))
                     for f in sq_facts:
                         if f not in facts:
                             facts.append(f)
+                    # Merge nodes/edges from sub-queries
+                    for n in sq_result["nodes"]:
+                        if n not in collected_nodes:
+                            collected_nodes.append(n)
+                    for e in sq_result["edges"]:
+                        if e not in collected_edges:
+                            collected_edges.append(e)
             except Exception as e:
                 logger.warning(f"Sub-question generation failed: {e}")
 
@@ -518,16 +562,40 @@ class ZepToolsService:
             f"sub_questions={len(sub_questions)}"
         )
 
+        # Convert collected dicts to NodeInfo/EdgeInfo objects
+        node_infos = [
+            NodeInfo(
+                uuid=n.get("id", ""),
+                name=n.get("name", ""),
+                labels=["Entity", n.get("type", "UNKNOWN")] if n.get("type") else ["Entity"],
+                summary=n.get("description", ""),
+                attributes={},
+            )
+            for n in collected_nodes[:max_nodes]
+        ]
+        edge_infos = [
+            EdgeInfo(
+                uuid=f"{e.get('source', '')}-{e.get('target', '')}",
+                name=e.get("relation", "RELATED_TO"),
+                fact=e.get("description", ""),
+                source_node_uuid="",
+                target_node_uuid="",
+                source_node_name=e.get("source", ""),
+                target_node_name=e.get("target", ""),
+            )
+            for e in collected_edges[:max_edges]
+        ]
+
         return InsightForgeResult(
             query=query,
             simulation_requirement=simulation_requirement,
             sub_questions=sub_questions,
             facts=facts[:max_facts],
-            nodes=[],
-            edges=[],
+            nodes=node_infos,
+            edges=edge_infos,
             total_facts=len(facts),
-            total_nodes=0,
-            total_edges=0,
+            total_nodes=len(node_infos),
+            total_edges=len(edge_infos),
         )
 
     def panorama_search(self, graph_id: str, query: str = "", include_expired: bool = True) -> PanoramaResult:
@@ -566,11 +634,12 @@ class ZepToolsService:
                 ))
 
         # Get global community summary from LightRAG
-        summary_text = self._query_rag(
+        summary_result = self._query_rag(
             graph_id,
             "Provide a comprehensive overview of all entities, their relationships, and the main themes in this knowledge graph.",
             mode="global",
         )
+        summary_text = summary_result["text"]
         if not summary_text:
             entity_names = [n.name for n in nodes_info[:20]]
             summary_text = (
@@ -594,12 +663,12 @@ class ZepToolsService:
         limit: int = 5,
     ) -> SearchResult:
         """Fast naive search."""
-        raw = self._query_rag(graph_id, query, mode="naive")
-        facts = self._parse_facts(raw, limit=limit)
+        result = self._query_rag(graph_id, query, mode="naive")
+        facts = self._parse_facts(result["text"], limit=limit, raw_context=result.get("llm_failed", False))
         return SearchResult(
             facts=facts,
-            edges=[],
-            nodes=[],
+            edges=result["edges"],
+            nodes=result["nodes"],
             query=query,
             total_count=len(facts),
         )
@@ -768,7 +837,8 @@ class ZepToolsService:
 
         for node in candidate_nodes:
             entity_perspective = f"From the perspective of {node.name}, {interview_requirement}"
-            raw = self._query_rag(graph_id, entity_perspective, mode="local")
+            raw_result = self._query_rag(graph_id, entity_perspective, mode="local")
+            raw = raw_result["text"]
             agent_responses.append({
                 "agent_name": node.name,
                 "agent_type": next((l for l in node.labels if l not in ("Entity", "Node")), "Unknown"),

@@ -235,6 +235,7 @@ const triggerFileInput = () => {
 const handleFileSelect = (event) => {
   const selectedFiles = Array.from(event.target.files)
   addFiles(selectedFiles)
+  event.target.value = '';
 }
 
 const handleDragOver = (e) => {

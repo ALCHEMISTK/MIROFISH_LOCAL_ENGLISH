@@ -63,8 +63,10 @@ class FilteredEntities:
 
 
 import time as _time
+import threading
 
 _graph_cache: Dict[str, Any] = {}  # graph_id -> (graph, timestamp)
+_graph_cache_lock = threading.Lock()
 _GRAPH_CACHE_TTL = 60  # seconds
 
 
@@ -74,10 +76,11 @@ def _load_graph(graph_id: str):
     import networkx as nx
 
     now = _time.time()
-    if graph_id in _graph_cache:
-        graph, ts = _graph_cache[graph_id]
-        if now - ts < _GRAPH_CACHE_TTL:
-            return graph
+    with _graph_cache_lock:
+        if graph_id in _graph_cache:
+            graph, ts = _graph_cache[graph_id]
+            if now - ts < _GRAPH_CACHE_TTL:
+                return graph
 
     working_dir = get_working_dir(graph_id)
     graphml_path = os.path.join(working_dir, 'graph_chunk_entity_relation.graphml')
@@ -85,11 +88,12 @@ def _load_graph(graph_id: str):
         logger.warning(f"GraphML not found for graph_id={graph_id}: {graphml_path}")
         return nx.Graph()
     graph = nx.read_graphml(graphml_path)
-    # Evict expired entries to prevent unbounded growth
-    expired = [k for k, (_, ts) in _graph_cache.items() if now - ts >= _GRAPH_CACHE_TTL]
-    for k in expired:
-        _graph_cache.pop(k, None)
-    _graph_cache[graph_id] = (graph, now)
+    with _graph_cache_lock:
+        # Evict expired entries to prevent unbounded growth
+        expired = [k for k, (_, ts) in list(_graph_cache.items()) if now - ts >= _GRAPH_CACHE_TTL]
+        for k in expired:
+            _graph_cache.pop(k, None)
+        _graph_cache[graph_id] = (graph, now)
     return graph
 
 

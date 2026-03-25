@@ -77,7 +77,7 @@ router.beforeEach(async (to, from, next) => {
     next()
   } catch (e) {
     // Backend not reachable - let user proceed (they'll see errors)
-    setSetupStatus(true)
+    // Don't cache this result so it re-checks next navigation.
     next()
   }
 })

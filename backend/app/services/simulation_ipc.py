@@ -165,6 +165,9 @@ class SimulationIPCClient:
                     # Clean up command and response files
                     try:
                         os.remove(command_file)
+                    except OSError:
+                        pass  # Server may have already deleted it
+                    try:
                         os.remove(response_file)
                     except OSError:
                         pass
@@ -355,7 +358,14 @@ class SimulationIPCServer:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 return IPCCommand.from_dict(data)
-            except (json.JSONDecodeError, KeyError, OSError) as e:
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning(f"Corrupt command file {filepath}, removing: {e}")
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                continue
+            except OSError as e:
                 logger.warning(f"Failed to read command file: {filepath}, {e}")
                 continue
 

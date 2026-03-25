@@ -202,8 +202,6 @@ const props = defineProps({
   systemLogs: { type: Array, default: () => [] }
 })
 
-defineEmits(['next-step'])
-
 const selectedOntologyItem = ref(null)
 const logContent = ref(null)
 const creatingSimulation = ref(false)

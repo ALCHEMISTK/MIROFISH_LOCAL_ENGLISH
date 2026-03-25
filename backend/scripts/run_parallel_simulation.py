@@ -273,7 +273,14 @@ class ParallelIPCHandler:
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     return json.load(f)
-            except (json.JSONDecodeError, OSError):
+            except json.JSONDecodeError as e:
+                print(f"Warning: Corrupt command file {filepath}, removing: {e}")
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                continue
+            except OSError:
                 continue
 
         return None
@@ -530,29 +537,27 @@ class ParallelIPCHandler:
             return result
 
         try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
+            with sqlite3.connect(db_path) as conn:
+                cursor = conn.cursor()
 
-            # Query the latest interview record
-            cursor.execute("""
-                SELECT user_id, info, created_at
-                FROM trace
-                WHERE action = ? AND user_id = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            """, (ActionType.INTERVIEW.value, agent_id))
+                # Query the latest interview record
+                cursor.execute("""
+                    SELECT user_id, info, created_at
+                    FROM trace
+                    WHERE action = ? AND user_id = ?
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                """, (ActionType.INTERVIEW.value, agent_id))
 
-            row = cursor.fetchone()
-            if row:
-                user_id, info_json, created_at = row
-                try:
-                    info = json.loads(info_json) if info_json else {}
-                    result["response"] = info.get("response", info)
-                    result["timestamp"] = created_at
-                except json.JSONDecodeError:
-                    result["response"] = info_json
-
-            conn.close()
+                row = cursor.fetchone()
+                if row:
+                    user_id, info_json, created_at = row
+                    try:
+                        info = json.loads(info_json) if info_json else {}
+                        result["response"] = info.get("response", info)
+                        result["timestamp"] = created_at
+                    except json.JSONDecodeError:
+                        result["response"] = info_json
 
         except Exception as e:
             print(f"  Failed to read interview result: {e}")
@@ -684,67 +689,65 @@ def fetch_new_actions_from_db(
         return actions, new_last_rowid
 
     try:
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
+        with sqlite3.connect(db_path) as conn:
+            cursor = conn.cursor()
 
-        # Use rowid to track processed records (rowid is SQLite's built-in auto-increment field)
-        # This avoids created_at format differences (Twitter uses integer, Reddit uses datetime string)
-        cursor.execute("""
-            SELECT rowid, user_id, action, info
-            FROM trace
-            WHERE rowid > ?
-            ORDER BY rowid ASC
-        """, (last_rowid,))
+            # Use rowid to track processed records (rowid is SQLite's built-in auto-increment field)
+            # This avoids created_at format differences (Twitter uses integer, Reddit uses datetime string)
+            cursor.execute("""
+                SELECT rowid, user_id, action, info
+                FROM trace
+                WHERE rowid > ?
+                ORDER BY rowid ASC
+            """, (last_rowid,))
 
-        for rowid, user_id, action, info_json in cursor.fetchall():
-            # Update maximum rowid
-            new_last_rowid = rowid
+            for rowid, user_id, action, info_json in cursor.fetchall():
+                # Update maximum rowid
+                new_last_rowid = rowid
 
-            # Filter non-core actions
-            if action in FILTERED_ACTIONS:
-                continue
+                # Filter non-core actions
+                if action in FILTERED_ACTIONS:
+                    continue
 
-            # Parse action arguments
-            try:
-                action_args = json.loads(info_json) if info_json else {}
-            except json.JSONDecodeError:
-                action_args = {}
+                # Parse action arguments
+                try:
+                    action_args = json.loads(info_json) if info_json else {}
+                except json.JSONDecodeError:
+                    action_args = {}
 
-            # Simplify action_args, keeping only key fields (preserving full content without truncation)
-            simplified_args = {}
-            if 'content' in action_args:
-                simplified_args['content'] = action_args['content']
-            if 'post_id' in action_args:
-                simplified_args['post_id'] = action_args['post_id']
-            if 'comment_id' in action_args:
-                simplified_args['comment_id'] = action_args['comment_id']
-            if 'quoted_id' in action_args:
-                simplified_args['quoted_id'] = action_args['quoted_id']
-            if 'new_post_id' in action_args:
-                simplified_args['new_post_id'] = action_args['new_post_id']
-            if 'follow_id' in action_args:
-                simplified_args['follow_id'] = action_args['follow_id']
-            if 'query' in action_args:
-                simplified_args['query'] = action_args['query']
-            if 'like_id' in action_args:
-                simplified_args['like_id'] = action_args['like_id']
-            if 'dislike_id' in action_args:
-                simplified_args['dislike_id'] = action_args['dislike_id']
+                # Simplify action_args, keeping only key fields (preserving full content without truncation)
+                simplified_args = {}
+                if 'content' in action_args:
+                    simplified_args['content'] = action_args['content']
+                if 'post_id' in action_args:
+                    simplified_args['post_id'] = action_args['post_id']
+                if 'comment_id' in action_args:
+                    simplified_args['comment_id'] = action_args['comment_id']
+                if 'quoted_id' in action_args:
+                    simplified_args['quoted_id'] = action_args['quoted_id']
+                if 'new_post_id' in action_args:
+                    simplified_args['new_post_id'] = action_args['new_post_id']
+                if 'follow_id' in action_args:
+                    simplified_args['follow_id'] = action_args['follow_id']
+                if 'query' in action_args:
+                    simplified_args['query'] = action_args['query']
+                if 'like_id' in action_args:
+                    simplified_args['like_id'] = action_args['like_id']
+                if 'dislike_id' in action_args:
+                    simplified_args['dislike_id'] = action_args['dislike_id']
 
-            # Convert action type name
-            action_type = ACTION_TYPE_MAP.get(action, action.upper())
+                # Convert action type name
+                action_type = ACTION_TYPE_MAP.get(action, action.upper())
 
-            # Enrich with context info (post content, username, etc.)
-            _enrich_action_context(cursor, action_type, simplified_args, agent_names)
+                # Enrich with context info (post content, username, etc.)
+                _enrich_action_context(cursor, action_type, simplified_args, agent_names)
 
-            actions.append({
-                'agent_id': user_id,
-                'agent_name': agent_names.get(user_id, f'Agent_{user_id}'),
-                'action_type': action_type,
-                'action_args': simplified_args,
-            })
-
-        conn.close()
+                actions.append({
+                    'agent_id': user_id,
+                    'agent_name': agent_names.get(user_id, f'Agent_{user_id}'),
+                    'action_type': action_type,
+                    'action_args': simplified_args,
+                })
     except Exception as e:
         print(f"Failed to read actions from database: {e}")
 
@@ -1025,22 +1028,38 @@ def create_model(config: Dict[str, Any], use_boost: bool = False):
     if not llm_model:
         llm_model = config.get("llm_model", "qwen2.5:7b")
 
-    # Set environment variables required by camel-ai
-    if llm_api_key:
-        os.environ["OPENAI_API_KEY"] = llm_api_key
+    # Set environment variables required by camel-ai.
+    # Save and restore original values to avoid clobbering when creating
+    # multiple models with different credentials (e.g. general + boost LLM).
+    _orig_key = os.environ.get("OPENAI_API_KEY")
+    _orig_url = os.environ.get("OPENAI_API_BASE_URL")
 
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("Missing API Key config. Please set LLM_API_KEY in the project root .env file")
+    try:
+        if llm_api_key:
+            os.environ["OPENAI_API_KEY"] = llm_api_key
 
-    if llm_base_url:
-        os.environ["OPENAI_API_BASE_URL"] = llm_base_url
+        if not os.environ.get("OPENAI_API_KEY"):
+            raise ValueError("Missing API Key config. Please set LLM_API_KEY in the project root .env file")
 
-    print(f"{config_label} model={llm_model}, base_url={llm_base_url[:40] if llm_base_url else 'default'}...")
+        if llm_base_url:
+            os.environ["OPENAI_API_BASE_URL"] = llm_base_url
 
-    return ModelFactory.create(
-        model_platform=ModelPlatformType.OPENAI,
-        model_type=llm_model,
-    )
+        print(f"{config_label} model={llm_model}, base_url={llm_base_url[:40] if llm_base_url else 'default'}...")
+
+        return ModelFactory.create(
+            model_platform=ModelPlatformType.OPENAI,
+            model_type=llm_model,
+        )
+    finally:
+        # Restore original env vars so the next create_model call starts clean
+        if _orig_key is not None:
+            os.environ["OPENAI_API_KEY"] = _orig_key
+        elif "OPENAI_API_KEY" in os.environ:
+            del os.environ["OPENAI_API_KEY"]
+        if _orig_url is not None:
+            os.environ["OPENAI_API_BASE_URL"] = _orig_url
+        elif "OPENAI_API_BASE_URL" in os.environ:
+            del os.environ["OPENAI_API_BASE_URL"]
 
 
 def get_active_agents_for_round(
@@ -1162,7 +1181,7 @@ async def run_twitter_simulation(
         agent_graph=result.agent_graph,
         platform=oasis.DefaultPlatformType.TWITTER,
         database_path=db_path,
-        semaphore=30,  # Limit max concurrent LLM requests to prevent API overload
+        semaphore=int(os.environ.get("SIM_OASIS_SEMAPHORE", "30")),  # Limit max concurrent LLM requests to prevent API overload
     )
 
     await result.env.reset()
@@ -1353,7 +1372,7 @@ async def run_reddit_simulation(
         agent_graph=result.agent_graph,
         platform=oasis.DefaultPlatformType.REDDIT,
         database_path=db_path,
-        semaphore=30,  # Limit max concurrent LLM requests to prevent API overload
+        semaphore=int(os.environ.get("SIM_OASIS_SEMAPHORE", "30")),  # Limit max concurrent LLM requests to prevent API overload
     )
 
     await result.env.reset()

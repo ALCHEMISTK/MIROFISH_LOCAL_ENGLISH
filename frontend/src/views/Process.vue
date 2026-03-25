@@ -415,6 +415,7 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { generateOntology, getProject, buildGraph, getTaskStatus, getGraphData } from '../api/graph'
+import { createSimulation } from '../api/simulation'
 import { getPendingUpload, clearPendingUpload } from '../store/pendingUpload'
 import * as d3 from 'd3'
 
@@ -442,6 +443,9 @@ const graphSvg = ref(null)
 
 // Polling timer
 let pollTimer = null
+
+// D3 simulation reference (for cleanup)
+let d3Simulation = null
 
 // Computed
 const statusClass = computed(() => {
@@ -480,9 +484,31 @@ const goHome = () => {
   router.push('/')
 }
 
-const goToNextStep = () => {
-  // TODO: Enter environment setup step
-  alert('Environment setup feature under development...')
+const goToNextStep = async () => {
+  if (!projectData.value?.project_id || !projectData.value?.graph_id) {
+    console.error('Missing project or graph info')
+    return
+  }
+
+  try {
+    const res = await createSimulation({
+      project_id: projectData.value.project_id,
+      graph_id: projectData.value.graph_id,
+      enable_twitter: true,
+      enable_reddit: true
+    })
+
+    if (res.success && res.data?.simulation_id) {
+      router.push({
+        name: 'Simulation',
+        params: { simulationId: res.data.simulation_id }
+      })
+    } else {
+      console.error('Failed to create simulation:', res.error)
+    }
+  } catch (err) {
+    console.error('Simulation creation error:', err)
+  }
 }
 
 const toggleFullScreen = () => {
@@ -947,7 +973,13 @@ const renderGraph = () => {
     .range(['#FF6B35', '#004E89', '#7B2D8E', '#1A936F', '#C5283D', '#E9724C', '#2D3436', '#6C5CE7'])
   
   // Force-directed layout
-  const simulation = d3.forceSimulation(nodes)
+  // Stop previous simulation if any
+  if (d3Simulation) {
+    d3Simulation.stop()
+    d3Simulation = null
+  }
+
+  const simulation = d3Simulation = d3.forceSimulation(nodes)
     .force('link', d3.forceLink(edges).id(d => d.id).distance(100).strength(0.5))
     .force('charge', d3.forceManyBody().strength(-300))
     .force('center', d3.forceCenter(width / 2, height / 2))
@@ -1087,6 +1119,10 @@ onMounted(() => {
 onUnmounted(() => {
   stopPolling()
   stopGraphPolling()
+  if (d3Simulation) {
+    d3Simulation.stop()
+    d3Simulation = null
+  }
 })
 </script>
 

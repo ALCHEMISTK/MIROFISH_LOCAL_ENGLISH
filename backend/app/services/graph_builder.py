@@ -185,8 +185,7 @@ class GraphBuilderService:
             })
 
         except Exception as e:
-            import traceback
-            self.task_manager.fail_task(task_id, f"{str(e)}\n{traceback.format_exc()}")
+            self.task_manager.fail_task(task_id, str(e))
 
     def create_graph(self, name: str) -> str:
         """Create a new LightRAG graph and return its graph_id."""
@@ -209,6 +208,28 @@ class GraphBuilderService:
             json.dump(ontology, f, indent=2, ensure_ascii=False)
         logger.debug(f"Ontology hints saved to {hints_path}")
 
+    def _get_ontology_prefix(self, graph_id: str) -> str:
+        """Build an extraction hint prefix from saved ontology."""
+        working_dir = get_working_dir(graph_id)
+        hints_path = os.path.join(working_dir, "extraction_hints.json")
+        if not os.path.exists(hints_path):
+            return ""
+        try:
+            with open(hints_path, 'r', encoding='utf-8') as f:
+                ontology = json.load(f)
+            entity_types = [et.get("name", "") for et in ontology.get("entity_types", []) if et.get("name")]
+            edge_types = [et.get("name", "") for et in ontology.get("edge_types", []) if et.get("name")]
+            if not entity_types and not edge_types:
+                return ""
+            parts = []
+            if entity_types:
+                parts.append(f"[Entity types to extract: {', '.join(entity_types)}]")
+            if edge_types:
+                parts.append(f"[Relationship types to extract: {', '.join(edge_types)}]")
+            return "\n".join(parts) + "\n\n"
+        except Exception:
+            return ""
+
     def add_text_batches(
         self,
         graph_id: str,
@@ -225,11 +246,13 @@ class GraphBuilderService:
         rag = get_rag(graph_id, create_if_missing=True)
         total_chunks = len(chunks)
         chunk_ids = []
+        ontology_prefix = self._get_ontology_prefix(graph_id)
 
         for i, chunk in enumerate(chunks):
             chunk_id = f"chunk_{i}"
+            text_to_insert = ontology_prefix + chunk if ontology_prefix else chunk
             try:
-                run_async(rag.ainsert(chunk))
+                run_async(rag.ainsert(text_to_insert))
                 chunk_ids.append(chunk_id)
             except Exception as e:
                 friendly_error = format_graph_build_error(e)
