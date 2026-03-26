@@ -20,7 +20,7 @@ class Config:
 
     # Flask
     SECRET_KEY = os.environ.get('SECRET_KEY', 'mirofish-secret-key')
-    DEBUG = os.environ.get('FLASK_DEBUG', 'True').lower() == 'true'
+    DEBUG = os.environ.get('FLASK_DEBUG', 'False').lower() == 'true'
 
     # JSON - disable ASCII escaping for Unicode support
     JSON_AS_ASCII = False
@@ -151,13 +151,13 @@ class Config:
         # Only apply settings.json value when the env var is absent from the environment.
         # load_dotenv() already populated os.environ from .env, so checking os.environ
         # is sufficient to determine whether .env defined a key.
-        if not os.environ.get('LLM_API_KEY') and settings.get("llm_api_key"):
+        if 'LLM_API_KEY' not in os.environ and settings.get("llm_api_key"):
             cls.LLM_API_KEY = settings["llm_api_key"]
-        if not os.environ.get('LLM_BASE_URL') and settings.get("llm_base_url"):
+        if 'LLM_BASE_URL' not in os.environ and settings.get("llm_base_url"):
             cls.LLM_BASE_URL = settings["llm_base_url"]
-        if not os.environ.get('LLM_MODEL_NAME') and settings.get("llm_model_name"):
+        if 'LLM_MODEL_NAME' not in os.environ and settings.get("llm_model_name"):
             cls.LLM_MODEL_NAME = settings["llm_model_name"]
-        if not os.environ.get('EMBED_MODEL') and not os.environ.get('OLLAMA_EMBED_MODEL'):
+        if 'EMBED_MODEL' not in os.environ and 'OLLAMA_EMBED_MODEL' not in os.environ:
             embed = settings.get("embed_model") or settings.get("ollama_embed_model")
             if embed:
                 cls.EMBED_MODEL = embed

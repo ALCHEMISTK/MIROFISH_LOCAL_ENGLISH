@@ -160,6 +160,10 @@ def split_text_into_chunks(
     Returns:
         List of text chunks
     """
+    if chunk_size <= 0:
+        raise ValueError(f"chunk_size must be positive, got {chunk_size}")
+    if overlap < 0:
+        overlap = 0
     if overlap >= chunk_size:
         overlap = chunk_size // 2
 

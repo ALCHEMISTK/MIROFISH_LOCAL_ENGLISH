@@ -774,7 +774,11 @@ class SimulationRunner:
         else:
             # Unix: terminate via process group
             # Since start_new_session=True was used, the process group ID equals the main process PID
-            pgid = os.getpgid(process.pid)
+            try:
+                pgid = os.getpgid(process.pid)
+            except ProcessLookupError:
+                logger.info(f"Process already exited: simulation={simulation_id}")
+                return
             logger.info(f"Terminating process group (Unix): simulation={simulation_id}, pgid={pgid}")
 
             # Send SIGTERM to the entire process group
@@ -785,7 +789,10 @@ class SimulationRunner:
             except subprocess.TimeoutExpired:
                 # If still running after timeout, force send SIGKILL
                 logger.warning(f"Process group not responding to SIGTERM, force terminating: {simulation_id}")
-                os.killpg(pgid, signal.SIGKILL)
+                try:
+                    os.killpg(pgid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
                 process.wait(timeout=5)
 
     @classmethod
@@ -1209,10 +1216,11 @@ class SimulationRunner:
 
         Called when the server shuts down to ensure all child processes are terminated
         """
-        # Prevent duplicate cleanup
-        if cls._cleanup_done:
-            return
-        cls._cleanup_done = True
+        # Prevent duplicate cleanup (thread-safe check-and-set)
+        with cls._lock:
+            if cls._cleanup_done:
+                return
+            cls._cleanup_done = True
 
         # Check if there is anything to clean (avoid printing useless logs for empty processes)
         has_processes = bool(cls._processes)

@@ -97,7 +97,7 @@ def _load_graph(graph_id: str):
             _graph_cache.pop(k, None)
         # Evict oldest if cache exceeds max size
         while len(_graph_cache) >= cache_max:
-            oldest_key = min(_graph_cache, key=lambda k: _graph_cache[k][1])
+            oldest_key = min(_graph_cache, key=lambda ck: _graph_cache[ck][1])
             _graph_cache.pop(oldest_key, None)
         _graph_cache[graph_id] = (graph, now)
     return graph
@@ -143,6 +143,79 @@ class ZepEntityReader:
                 "attributes": dict(data),
             })
         return edges
+
+    def get_entity_with_context(
+        self,
+        graph_id: str,
+        entity_uuid: str,
+    ) -> Optional[EntityNode]:
+        """
+        Get a single entity with its full context (edges and related nodes).
+
+        Args:
+            graph_id: Graph ID
+            entity_uuid: Entity UUID
+
+        Returns:
+            EntityNode or None
+        """
+        try:
+            G = _load_graph(graph_id)
+            if entity_uuid not in G.nodes:
+                return None
+
+            data = dict(G.nodes[entity_uuid])
+            entity_type = data.get('entity_type', 'UNKNOWN').upper()
+
+            # Build edges for this node
+            all_edges = self.get_all_edges(graph_id)
+            all_nodes = self.get_all_nodes(graph_id)
+            node_map = {n["uuid"]: n for n in all_nodes}
+
+            related_edges = []
+            related_node_uuids: Set[str] = set()
+
+            for edge in all_edges:
+                if edge["source_node_uuid"] == entity_uuid:
+                    related_edges.append({
+                        "direction": "outgoing",
+                        "edge_name": edge["name"],
+                        "fact": edge["fact"],
+                        "target_node_uuid": edge["target_node_uuid"],
+                    })
+                    related_node_uuids.add(edge["target_node_uuid"])
+                elif edge["target_node_uuid"] == entity_uuid:
+                    related_edges.append({
+                        "direction": "incoming",
+                        "edge_name": edge["name"],
+                        "fact": edge["fact"],
+                        "source_node_uuid": edge["source_node_uuid"],
+                    })
+                    related_node_uuids.add(edge["source_node_uuid"])
+
+            related_nodes = [
+                {
+                    "uuid": ru,
+                    "name": node_map[ru]["name"],
+                    "labels": node_map[ru]["labels"],
+                    "summary": node_map[ru]["summary"],
+                }
+                for ru in related_node_uuids if ru in node_map
+            ]
+
+            return EntityNode(
+                uuid=entity_uuid,
+                name=data.get('entity_name', entity_uuid),
+                labels=["Entity", entity_type],
+                summary=data.get('description', ''),
+                attributes=data,
+                related_edges=related_edges,
+                related_nodes=related_nodes,
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to get entity {entity_uuid}: {str(e)}")
+            return None
 
     def filter_defined_entities(
         self,

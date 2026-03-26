@@ -576,7 +576,7 @@ def list_tasks():
 
         return jsonify({
             "success": True,
-            "data": [t.to_dict() for t in tasks],
+            "data": tasks,
             "count": len(tasks)
         })
     except Exception as e:
@@ -613,7 +613,7 @@ def get_graph_data(graph_id: str):
 @graph_bp.route('/delete/<graph_id>', methods=['DELETE'])
 def delete_graph(graph_id: str):
     """
-    Delete Zep graph
+    Delete LightRAG graph
     """
     try:
         validate_id(graph_id, "graph_id")

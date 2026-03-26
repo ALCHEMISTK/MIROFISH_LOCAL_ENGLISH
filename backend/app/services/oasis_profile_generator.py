@@ -69,7 +69,7 @@ class OasisAgentProfile:
         }
 
         # Add extra persona information if available
-        if self.age:
+        if self.age is not None:
             profile["age"] = self.age
         if self.gender:
             profile["gender"] = self.gender
@@ -873,8 +873,11 @@ Important:
                     # Real-time file write (even for fallback personas)
                     save_profiles_realtime()
 
+        # Filter out any None entries from failed generations
+        profiles = [p for p in profiles if p is not None]
+
         print(f"\n{'='*60}")
-        print(f"Persona generation complete! Generated {len([p for p in profiles if p])} Agents")
+        print(f"Persona generation complete! Generated {len(profiles)} Agents")
         print(f"{'='*60}\n")
 
         return profiles
@@ -1032,10 +1035,10 @@ Important:
                 "name": profile.name,
                 "bio": profile.bio[:150] if profile.bio else f"{profile.name}",
                 "persona": profile.persona or f"{profile.name} is a participant in social discussions.",
-                "karma": profile.karma if profile.karma else 1000,
+                "karma": profile.karma if profile.karma is not None else 1000,
                 "created_at": profile.created_at,
                 # OASIS required fields — ensure all have default values
-                "age": profile.age if profile.age else 30,
+                "age": profile.age if profile.age is not None else 30,
                 "gender": self._normalize_gender(profile.gender),
                 "mbti": profile.mbti if profile.mbti else "ISTJ",
                 "country": profile.country if profile.country else "China",

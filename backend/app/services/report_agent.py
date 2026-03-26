@@ -2135,7 +2135,11 @@ class ReportManager:
     @classmethod
     def _get_report_folder(cls, report_id: str) -> str:
         """Get the report folder path."""
-        return os.path.join(cls.REPORTS_DIR, report_id)
+        folder = os.path.normpath(os.path.join(cls.REPORTS_DIR, report_id))
+        # Prevent path traversal
+        if not folder.startswith(os.path.normpath(cls.REPORTS_DIR)):
+            raise ValueError(f"Invalid report_id: {report_id}")
+        return folder
 
     @classmethod
     def _ensure_report_folder(cls, report_id: str) -> str:

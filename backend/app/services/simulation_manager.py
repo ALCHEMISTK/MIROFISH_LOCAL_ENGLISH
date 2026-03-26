@@ -142,20 +142,34 @@ class SimulationManager:
 
     def _get_simulation_dir(self, simulation_id: str, create: bool = False) -> str:
         """Get simulation data directory"""
-        sim_dir = os.path.join(self.SIMULATION_DATA_DIR, simulation_id)
+        sim_dir = os.path.normpath(os.path.join(self.SIMULATION_DATA_DIR, simulation_id))
+        # Prevent path traversal
+        if not sim_dir.startswith(os.path.normpath(self.SIMULATION_DATA_DIR)):
+            raise ValueError(f"Invalid simulation_id: {simulation_id}")
         if create:
             os.makedirs(sim_dir, exist_ok=True)
         return sim_dir
 
     def _save_simulation_state(self, state: SimulationState):
-        """Save simulation state to file (thread-safe)"""
+        """Save simulation state to file (thread-safe, atomic write)"""
+        import tempfile
         sim_dir = self._get_simulation_dir(state.simulation_id, create=True)
         state_file = os.path.join(sim_dir, "state.json")
 
         state.updated_at = datetime.now().isoformat()
 
-        with open(state_file, 'w', encoding='utf-8') as f:
-            json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
+        # Atomic write: write to temp file then rename
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=sim_dir, suffix='.tmp')
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                json.dump(state.to_dict(), f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, state_file)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         with self._sim_lock:
             self._simulations[state.simulation_id] = state
@@ -181,8 +195,12 @@ class SimulationManager:
         if not os.path.exists(state_file):
             return None
 
-        with open(state_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
+        try:
+            with open(state_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Corrupt state file for {simulation_id}: {e}")
+            return None
 
         state = SimulationState(
             simulation_id=simulation_id,

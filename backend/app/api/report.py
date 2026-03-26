@@ -265,6 +265,8 @@ def get_generate_status():
             "data": task.to_dict()
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to query task status: {str(e)}")
         return jsonify({
@@ -393,6 +395,8 @@ def list_reports():
             "count": len(reports)
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to list reports: {str(e)}")
         return jsonify({
@@ -421,26 +425,14 @@ def download_report(report_id: str):
         md_path = ReportManager._get_report_markdown_path(report_id)
 
         if not os.path.exists(md_path):
-            # If the MD file does not exist, generate a temporary file
-            import tempfile
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
-                f.write(report.markdown_content or "")
-                temp_path = f.name
-
-            from flask import after_this_request
-
-            @after_this_request
-            def cleanup(response):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
-                return response
-
+            # No MD file on disk — serve content directly from memory
+            import io
+            content = (report.markdown_content or "").encode('utf-8')
             return send_file(
-                temp_path,
+                io.BytesIO(content),
                 as_attachment=True,
-                download_name=f"{report_id}.md"
+                download_name=f"{report_id}.md",
+                mimetype='text/markdown'
             )
 
         return send_file(

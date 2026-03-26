@@ -378,9 +378,20 @@ class SimulationIPCServer:
         Args:
             response: IPC response
         """
+        import tempfile
         response_file = os.path.join(self.responses_dir, f"{response.command_id}.json")
-        with open(response_file, 'w', encoding='utf-8') as f:
-            json.dump(response.to_dict(), f, ensure_ascii=False, indent=2)
+        # Atomic write: write to temp file then rename to prevent partial reads
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=self.responses_dir, suffix='.tmp')
+        try:
+            with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
+                json.dump(response.to_dict(), f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, response_file)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
         # Delete the command file
         command_file = os.path.join(self.commands_dir, f"{response.command_id}.json")

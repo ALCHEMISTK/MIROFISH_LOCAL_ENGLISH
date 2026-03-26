@@ -66,11 +66,8 @@ def save_settings(settings):
     try:
         with os.fdopen(tmp_fd, 'w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2, ensure_ascii=False)
-        # Atomic rename (on Windows, need to remove target first)
-        if os.path.exists(SETTINGS_PATH):
-            os.replace(tmp_path, SETTINGS_PATH)
-        else:
-            os.rename(tmp_path, SETTINGS_PATH)
+        # Atomic rename (os.replace works on both Windows and Unix)
+        os.replace(tmp_path, SETTINGS_PATH)
         # Restrict permissions on non-Windows (settings may contain API keys)
         if sys.platform != 'win32':
             try:

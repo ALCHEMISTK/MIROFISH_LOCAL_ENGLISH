@@ -69,7 +69,10 @@ class LLMClient:
         if content is None:
             return ""
         # Some models may include <think> reasoning content in the response.
-        return re.sub(r'<think>[\s\S]*?</think>', '', content).strip()
+        content = re.sub(r'<think>[\s\S]*?</think>', '', content)
+        # Handle unclosed <think> tags (truncated responses)
+        content = re.sub(r'<think>[\s\S]*$', '', content)
+        return content.strip()
 
     def is_quota_exhausted_error(self, exc: Exception) -> bool:
         """Return True when the provider indicates a hard quota/usage limit."""
@@ -132,7 +135,7 @@ class LLMClient:
             try:
                 from json_repair import repair_json
                 repaired = repair_json(cleaned_response, return_objects=True)
-                if repaired:
+                if isinstance(repaired, dict):
                     return repaired
             except Exception as repair_err:
                 logger.warning(f"JSON repair also failed: {repair_err}")

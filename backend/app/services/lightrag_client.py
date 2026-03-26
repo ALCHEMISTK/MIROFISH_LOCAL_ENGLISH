@@ -208,9 +208,11 @@ def build_lightrag_llm_binding(entity_normalization_rules: str = ""):
         max_attempts = 8
         for attempt in range(1, max_attempts + 1):
             await limiter.acquire()
+            succeeded = False
             try:
                 result = await openai_llm_complete(**call_kwargs)
                 await limiter.on_success()
+                succeeded = True
                 return result
             except Exception as e:
                 from tenacity import RetryError
@@ -228,7 +230,8 @@ def build_lightrag_llm_binding(entity_normalization_rules: str = ""):
                 )
                 await asyncio.sleep(cooldown)
             finally:
-                limiter.release()
+                if not succeeded:
+                    limiter.release()
 
     return cloud_llm_func, {}
 
@@ -427,7 +430,11 @@ def get_working_dir(graph_id: str) -> str:
     """Return the filesystem path for a graph's LightRAG working directory."""
     data_dir = Config.LIGHTRAG_DATA_DIR
     os.makedirs(data_dir, exist_ok=True)
-    return os.path.join(data_dir, graph_id)
+    result = os.path.normpath(os.path.join(data_dir, graph_id))
+    # Prevent path traversal
+    if not result.startswith(os.path.normpath(data_dir)):
+        raise ValueError(f"Invalid graph_id: {graph_id}")
+    return result
 
 
 def _build_normalization_rules(graph_id: str) -> str:
@@ -481,10 +488,12 @@ def get_rag(graph_id: str, create_if_missing: bool = True, entity_types: Optiona
                       Injected into LightRAG's extraction prompt via addon_params.
                       If None, LightRAG uses its built-in defaults.
     """
-    # Fast path — no lock needed for reads (skip if entity_types provided,
+    # Fast path — single atomic dict lookup (skip if entity_types provided,
     # since caller wants a fresh instance with custom extraction config)
-    if graph_id in _rag_instances and not entity_types:
-        return _rag_instances[graph_id]
+    if not entity_types:
+        cached = _rag_instances.get(graph_id)
+        if cached is not None:
+            return cached
 
     with _rag_lock:
         # Double-check inside lock
@@ -556,18 +565,21 @@ def get_rag(graph_id: str, create_if_missing: bool = True, entity_types: Optiona
                     import numpy as np
                     limiter = _get_rate_limiter()
                     await limiter.acquire()
+                    succeeded = False
                     try:
                         resp = await _cloud_embed_client.embeddings.create(model=embed_model, input=texts)
                         await limiter.on_success()
+                        succeeded = True
                         return np.array(
                             [d.embedding for d in resp.data], dtype=np.float32
                         )
                     except Exception as e:
-                        if "429" in str(e) or "rate" in str(getattr(e, 'status_code', '')):
+                        if "429" in str(e) or getattr(e, 'status_code', None) == 429:
                             await limiter.on_rate_limit()
                         raise
                     finally:
-                        limiter.release()
+                        if not succeeded:
+                            limiter.release()
 
             # LightRAG concurrency settings.
             # Cloud APIs: high concurrency with adaptive rate limiter.

@@ -264,6 +264,7 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
     # Check which platforms are enabled from state
     import json
     state_path = os.path.join(simulation_dir, "state.json")
+    state_data = None
     try:
         with open(state_path, 'r', encoding='utf-8') as f:
             state_data = json.load(f)
@@ -293,6 +294,8 @@ def _check_simulation_prepared(simulation_id: str) -> tuple:
         }
 
     # Reuse already-loaded state_data instead of reading the file again (TOCTOU fix)
+    if state_data is None:
+        return False, {"reason": "Could not parse state.json"}
     try:
         status = state_data.get("status", "")
         config_generated = state_data.get("config_generated", False)
@@ -1067,6 +1070,8 @@ def get_simulation_profiles_realtime(simulation_id: str):
     try:
         _validate_id(simulation_id, "simulation_id")
         platform = request.args.get('platform', 'reddit')
+        if platform not in ('twitter', 'reddit'):
+            return jsonify({"success": False, "error": "platform must be 'twitter' or 'reddit'"}), 400
 
         # Get simulation directory
         sim_dir = os.path.join(Config.OASIS_SIMULATION_DATA_DIR, simulation_id)
@@ -1325,6 +1330,8 @@ def download_simulation_config(simulation_id: str):
             download_name="simulation_config.json"
         )
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to download configuration: {str(e)}")
         return jsonify({
@@ -1695,6 +1702,9 @@ def stop_simulation():
 
         run_state = SimulationRunner.stop_simulation(simulation_id)
 
+        if not run_state:
+            return jsonify({"success": False, "error": "Simulation not found or not running"}), 404
+
         # Update simulation status
         manager = SimulationManager()
         state = manager.get_simulation(simulation_id)
@@ -1876,6 +1886,8 @@ def get_run_status_detail(simulation_id: str):
             "data": result
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get detailed status: {str(e)}")
         return jsonify({
@@ -1907,8 +1919,8 @@ def get_simulation_actions(simulation_id: str):
     """
     try:
         _validate_id(simulation_id, "simulation_id")
-        limit = request.args.get('limit', 100, type=int)
-        offset = request.args.get('offset', 0, type=int)
+        limit = min(request.args.get('limit', 100, type=int), 500)
+        offset = max(request.args.get('offset', 0, type=int), 0)
         platform = request.args.get('platform')
         agent_id = request.args.get('agent_id', type=int)
         round_num = request.args.get('round_num', type=int)
@@ -1970,6 +1982,8 @@ def get_simulation_timeline(simulation_id: str):
             }
         })
 
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
     except Exception as e:
         logger.error(f"Failed to get timeline: {str(e)}")
         return jsonify({
@@ -2024,6 +2038,8 @@ def get_simulation_posts(simulation_id: str):
     try:
         _validate_id(simulation_id, "simulation_id")
         platform = request.args.get('platform', 'reddit')
+        if platform not in ('twitter', 'reddit'):
+            return jsonify({"success": False, "error": "platform must be 'twitter' or 'reddit'"}), 400
         limit = min(request.args.get('limit', 50, type=int), 500)
         offset = max(request.args.get('offset', 0, type=int), 0)
 

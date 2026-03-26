@@ -303,7 +303,7 @@ class ZepToolsService:
                     self._graph_cache.pop(k, None)
                 # Evict oldest if cache exceeds max size
                 while len(self._graph_cache) >= cache_max:
-                    oldest_key = min(self._graph_cache, key=lambda k: self._graph_cache[k][1])
+                    oldest_key = min(self._graph_cache, key=lambda ck: self._graph_cache[ck][1])
                     self._graph_cache.pop(oldest_key, None)
                 self._graph_cache[graph_id] = (graph, now)
             return graph
